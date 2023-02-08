@@ -1,14 +1,7 @@
 ﻿using PGP.Utils;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
-namespace PGP.Core
-{
-  public static class Operators
-  {
+namespace PGP.Core {
+  public static class Operators {
     //public static Operator Addition = new Operator(new(x => x[0] + x[1]), 2);
     //public static Operator Subtraction = new Operator(x => x[0] - x[1], 2);
     //public static Operator Multiplication = new Operator(x => x[0] * x[1], 2);
@@ -81,8 +74,7 @@ namespace PGP.Core
     }
   }
 
-  public class Operator
-  {
+  public class Operator {
     public Func<Stack<double>, double> Function { get; set; }
     public int Arity { get; set; }
     public string Symbol { get; set; }
@@ -96,8 +88,7 @@ namespace PGP.Core
     }
   }
 
-  public class Variable
-  {
+  public class Variable {
     public string Name { get; set; }
     public int Index { get; set; }
     public double Coefficient { get; set; }
@@ -109,8 +100,7 @@ namespace PGP.Core
     }
   }
 
-  public class Constant
-  {
+  public class Constant {
     public string Name { get; set; }
     public double Value { get; set; }
 
@@ -131,8 +121,7 @@ namespace PGP.Core
 
   // composition node
   // not clean, but fast (?)
-  public class Symbol
-  {
+  public class Symbol {
     public SymbolType Type { get; set; }
     public Variable Var { get; set; }
     public Constant Con { get; set; }
@@ -149,5 +138,4 @@ namespace PGP.Core
   }
 
   public enum SymbolType { Variable, Constant, Operator }
-
 }

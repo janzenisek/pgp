@@ -1,21 +1,14 @@
 ﻿using PGP.Utils;
-using System;
 using System.Collections;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
 
-namespace PGP.Data
-{
+namespace PGP.Data {
 
-  public interface ISource : ICloneable
-  {
+  public interface ISource : ICloneable {
     string Id { get; set; }
     string ParentId { get; set; }
   }
 
-  public abstract class Source : ISource
-  {
+  public abstract class Source : ISource {
     public string Id { get; set; }
 
     public string ParentId { get; set; }
@@ -35,8 +28,7 @@ namespace PGP.Data
     public abstract object Clone();
   }
 
-  public class Set : Source
-  {
+  public class Set : Source {
 
     public string Name { get; set; }
     public string Description { get; set; }
@@ -50,8 +42,7 @@ namespace PGP.Data
     public Dictionary<string, Series<double>> GetDoubleSet() {
       var doubleSet = new Dictionary<string, Series<double>>();
 
-      foreach(var series in Series.Values.Where(x => x.DataType == typeof(double)))
-      {
+      foreach (var series in Series.Values.Where(x => x.DataType == typeof(double))) {
         doubleSet.Add(series.Name, (Series<double>)Series[series.Name]);
       }
 
@@ -61,8 +52,7 @@ namespace PGP.Data
     public Series<double> GetDoubleSeries(string name) {
       Series<double> s = null;
       if (Series.ContainsKey(name)
-        && Series[name].DataType == typeof(double))
-      {
+        && Series[name].DataType == typeof(double)) {
         s = (Series<double>)Series[name];
       }
       return s;
@@ -71,8 +61,7 @@ namespace PGP.Data
     public Series<string> GetStringSeries(string name) {
       Series<string> s = null;
       if (Series.ContainsKey(name)
-        && Series[name].DataType == typeof(string))
-      {
+        && Series[name].DataType == typeof(string)) {
         s = (Series<string>)Series[name];
       }
       return s;
@@ -81,8 +70,7 @@ namespace PGP.Data
     public Series<DateTime> GetDateTimeSeries(string name) {
       Series<DateTime> s = null;
       if (Series.ContainsKey(name)
-        && Series[name].DataType == typeof(DateTime))
-      {
+        && Series[name].DataType == typeof(DateTime)) {
         s = (Series<DateTime>)Series[name];
       }
       return s;
@@ -91,9 +79,8 @@ namespace PGP.Data
     public Set Subset(int start, int count) {
       var s = (Set)this.Clone();
 
-      foreach(var ser in Series.Keys)
-      {
-        if(s.Series[ser].DataType == typeof(double)) s.Series[ser].Values = ((List<double>)s.Series[ser].Values).GetRange(start, count);
+      foreach (var ser in Series.Keys) {
+        if (s.Series[ser].DataType == typeof(double)) s.Series[ser].Values = ((List<double>)s.Series[ser].Values).GetRange(start, count);
         if (s.Series[ser].DataType == typeof(string)) s.Series[ser].Values = ((List<string>)s.Series[ser].Values).GetRange(start, count);
         if (s.Series[ser].DataType == typeof(DateTime)) s.Series[ser].Values = ((List<DateTime>)s.Series[ser].Values).GetRange(start, count);
       }
@@ -104,13 +91,11 @@ namespace PGP.Data
     public Set Shuffle(FastRandom fr) {
       var s = (Set)this.Clone();
 
-      foreach (var ser in s.Series) ser.Value.Values.Clear();      
+      foreach (var ser in s.Series) ser.Value.Values.Clear();
       var order = Enumerable.Range(0, RowCount).ToList();
       order.ShuffleFisherYates(fr);
-      foreach (var ser in Series)
-      {
-        for (int i = 0; i < order.Count; i++)
-        {
+      foreach (var ser in Series) {
+        for (int i = 0; i < order.Count; i++) {
           s.Series[ser.Key].Values.Add(Series[ser.Key].Values[order[i]]);
         }
       }
@@ -119,8 +104,7 @@ namespace PGP.Data
 
     public double[] GetArray(List<string> order) {
       var arr = new double[Series.Count * RowCount];
-      for(int i = 0; i < order.Count; i++)
-      {
+      for (int i = 0; i < order.Count; i++) {
         Series[order[i]].Values.CopyTo(arr, i * RowCount);
       }
 
@@ -135,8 +119,7 @@ namespace PGP.Data
       clone.Path = Path;
 
       clone.Series = new Dictionary<string, ISeries>();
-      foreach (var s in Series)
-      {
+      foreach (var s in Series) {
         clone.Series.Add(s.Key, (ISeries)s.Value.Clone());
       }
 
@@ -156,15 +139,13 @@ namespace PGP.Data
     }
   }
 
-  public enum SupportedSeriesTypes
-  {
+  public enum SupportedSeriesTypes {
     Double,
     String,
     DateTime
   }
 
-  public interface ISeries : ISource
-  {
+  public interface ISeries : ISource {
     string Name { get; set; }
     IList Values { get; set; }
 
@@ -173,22 +154,18 @@ namespace PGP.Data
     Type ListType { get; }
   }
 
-  public class Series<T> : Source, ISeries
-  {
+  public class Series<T> : Source, ISeries {
 
     public string Name { get; set; }
 
     public List<T> Values { get; set; }
 
-    public Type DataType
-    {
+    public Type DataType {
       get { return typeof(T); }
     }
 
-    public Type ListType
-    {
-      get
-      {
+    public Type ListType {
+      get {
         var listType = typeof(List<>);
         var constructedListType = listType.MakeGenericType(DataType);
         return constructedListType;
@@ -208,15 +185,13 @@ namespace PGP.Data
       Values = new List<T>();
     }
 
-    IList ISeries.Values
-    {
+    IList ISeries.Values {
       get { return Values; }
       set { Values = (List<T>)value; }
 
     }
 
-    public T this[int idx]
-    {
+    public T this[int idx] {
       get => Values[idx];
       set => Values[idx] = value;
     }
@@ -225,8 +200,7 @@ namespace PGP.Data
       var clone = new Series<T>(this);
       clone.Name = Name;
 
-      foreach (var v in Values)
-      {
+      foreach (var v in Values) {
         clone.Values.Add(v);
       }
 

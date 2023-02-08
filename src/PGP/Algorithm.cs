@@ -55,7 +55,7 @@ namespace PGP.Core {
       TreeLength = treeLength;
 
       UseParallelization = false;
-      LogGenerations = false; 
+      LogGenerations = false;
 
       population = new RPN<Symbol>[PopulationSize];
       operatorToOperandRatio = 1.0 * Operators.All.Count / Operators.All.Sum(x => x.Arity);
@@ -65,7 +65,7 @@ namespace PGP.Core {
       var data = trainingData.GetArray(VariableIndices.Keys.ToList());
       Initialize(trainingData, data);
 
-      if (UseParallelization) RunParallel(trainingData, data);      
+      if (UseParallelization) RunParallel(trainingData, data);
       else Run(trainingData, data);
     }
 
@@ -130,10 +130,10 @@ namespace PGP.Core {
 
             // Evaluate
             //double f = EvaluateSet(populationNew[i], doubleSet, trainingData.RowCount, TargetVariable);            
-            double f = EvaluateSet(populationNew[i], localEvaluationBuffer, data, trainingData.RowCount, targetVariableIdx);            
+            double f = EvaluateSet(populationNew[i], localEvaluationBuffer, data, trainingData.RowCount, targetVariableIdx);
             localEvaluationCount++;
 
-            if(!double.IsNaN(f)) {
+            if (!double.IsNaN(f)) {
               //if (f > Math.Min(f1, f2)) { // OS              
               if (f > bestFitScore) {
                 lock (bestSolutionLocker) {
@@ -142,7 +142,7 @@ namespace PGP.Core {
                     bestSolution = (RPN<Symbol>)populationNew[i].CloneDeepWithResults();
                   }
                 }
-              }              
+              }
               fitScoresNew[i] = f;
               i++;
               //} // OS
@@ -151,7 +151,8 @@ namespace PGP.Core {
             //lock (locker) currentSelectionPressure = generationalEvaluations / (double)PopulationSize;
           }
           return localEvaluationCount;
-        }, (localEvaluationCount) => {
+        }, (localEvaluationCount) =>
+        {
           lock (locker) generationalEvaluationCount += localEvaluationCount;
         });
         // swap 
@@ -236,7 +237,7 @@ namespace PGP.Core {
 
         EvaluationCount += generationalEvaluationCount;
 
-        if(LogGenerations) Console.WriteLine($"Generation: {g:d4}, Evaluations: {generationalEvaluationCount:d4}, Selection Pressure: {currentSelectionPressure:f2}, Score: {bestFitScore:f4}");
+        if (LogGenerations) Console.WriteLine($"Generation: {g:d4}, Evaluations: {generationalEvaluationCount:d4}, Selection Pressure: {currentSelectionPressure:f2}, Score: {bestFitScore:f4}");
       }
     }
 
@@ -581,7 +582,7 @@ namespace PGP.Core {
       //if (double.IsInfinity(result)) result = double.MaxValue;
       //else if (double.IsNegativeInfinity(result)) result = double.MinValue;
 
-      
+
       p.TrueResults[idx] = data[targetVariableIdx * rowCount + idx];
       p.EstimatedResults[idx] = result;
       return p.TrueResults[idx] - result;

@@ -4,7 +4,6 @@ using PGP.Core;
 using System.Diagnostics;
 
 namespace PGP.Runner {
-
   public class Program {
     public static void Main(string[] args) {
       var fr = new FastRandom();
@@ -29,7 +28,6 @@ namespace PGP.Runner {
       Set trainingSetOriginalOrder = ds.Subset(0, 1000);
       Set trainingSet = trainingSetOriginalOrder.Shuffle(fr);
 
-
       // configure gp
       int generations = 1000;
       int populationSize = 100;
@@ -42,7 +40,7 @@ namespace PGP.Runner {
       Stopwatch sw = new Stopwatch();
       sw.Start();
       pgp.Fit(trainingSet);
-      sw.Stop();      
+      sw.Stop();
 
       Console.WriteLine();
       Console.WriteLine($"Runtime:           {(sw.ElapsedMilliseconds / 1000.0):f8} seconds");
@@ -62,7 +60,7 @@ namespace PGP.Runner {
 
     public static Dictionary<string, List<string>> InputVariables = new Dictionary<string, List<string>>()
     {
-       { "Resinet_BasicVariableSet_PvProduction", new List<string>() { "globalRadiation", "globalRadiationSum1h", "relativeHumidity", "airTemperature", "oneHourPrecipitationSum", "age", "dayLength", "hoursAfterSunrise" } }      
+       { "Resinet_BasicVariableSet_PvProduction", new List<string>() { "globalRadiation", "globalRadiationSum1h", "relativeHumidity", "airTemperature", "oneHourPrecipitationSum", "age", "dayLength", "hoursAfterSunrise" } }
       ,{ "Resinet_BasicVariableSet_PowerConsumption", new List<string>() { "globalRadiation", "relativeHumidity", "airTemperature", "oneHourPrecipitationSum", "age", "dayLength", "hoursAfterSunrise" } }
       ,{ "Resinet_BasicVariableSet_BatterySOC", new List<string>() { "globalRadiation", "globalRadiationSum1h", "globalRadiationSum2h", "globalRadiationSum3h", "globalRadiationSumFrame07to12h", "globalRadiationSumFrame13to24h", "relativeHumidity", "airTemperature", "oneHourPrecipitationSum", "age", "dayLength", "hoursAfterSunrise" } }
       ,{ "Resinet_ReducedVariableSet_PvProduction", new List<string>() { "globalRadiation", "age", "hoursAfterSunrise" } }
@@ -73,9 +71,6 @@ namespace PGP.Runner {
     public static string Resinet_TargetVariable_PvProduction = "pvProduction";
     public static string Resinet_TargetVariable_PowerConsumption = "powerConsumption";
     public static string Resinet_TargetVariable_BatterySOC = "batterySOC";
-
-
-
   }
 }
 

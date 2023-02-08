@@ -1,13 +1,8 @@
 ﻿using System.Collections;
 using System.Runtime.InteropServices;
-using System.Security.Cryptography;
-using System.Text;
 
-
-namespace PGP.Utils
-{
-  public static class Extensions
-  {
+namespace PGP.Utils {
+  public static class Extensions {
     public static IEnumerable<T> TakeLast<T>(this IEnumerable<T> source, double R) {
       if (R < 0 || R > 1.0) return null;
       var rn = (int)Math.Floor(source.Count() * R);
@@ -21,8 +16,7 @@ namespace PGP.Utils
     public static Dictionary<TKey, TValue> Clone<TKey, TValue>(this Dictionary<TKey, TValue> dictToClone) where TValue : ICloneable {
       //return dictToClone.Select(x => x).ToDictionary(v => (TKey)v.Key.Clone(), v => (TValue)v.Value.Clone());
       var dict = new Dictionary<TKey, TValue>(dictToClone.Count, dictToClone.Comparer);
-      foreach (var entry in dictToClone)
-      {
+      foreach (var entry in dictToClone) {
         dict.Add(entry.Key, (TValue)entry.Value.Clone());
       }
       return dict;
@@ -31,8 +25,7 @@ namespace PGP.Utils
     public static Dictionary<TKey, TValue> ShallowClone<TKey, TValue>(this Dictionary<TKey, TValue> dictToClone) {
       //return dictToClone.Select(x => x).ToDictionary(v => (TKey)v.Key.Clone(), v => (TValue)v.Value.Clone());
       var dict = new Dictionary<TKey, TValue>(dictToClone.Count, dictToClone.Comparer);
-      foreach (var entry in dictToClone)
-      {
+      foreach (var entry in dictToClone) {
         dict.Add(entry.Key, (TValue)entry.Value);
       }
       return dict;
@@ -40,8 +33,7 @@ namespace PGP.Utils
 
     public static Dictionary<TKey, TValue> CloneDictionary<TKey, TValue>(this Dictionary<TKey, TValue> dictToClone) where TValue : ICloneable {
       var dict = new Dictionary<TKey, TValue>(dictToClone.Count, dictToClone.Comparer);
-      foreach (var entry in dictToClone)
-      {
+      foreach (var entry in dictToClone) {
         dict.Add(entry.Key, (TValue)entry.Value.Clone());
       }
       return dict;
@@ -49,8 +41,7 @@ namespace PGP.Utils
 
     public static Dictionary<TKey, TValue> ShallowCloneDictionary<TKey, TValue>(this Dictionary<TKey, TValue> dictToClone) {
       var dict = new Dictionary<TKey, TValue>(dictToClone.Count, dictToClone.Comparer);
-      foreach (var entry in dictToClone)
-      {
+      foreach (var entry in dictToClone) {
         dict.Add(entry.Key, (TValue)entry.Value);
       }
       return dict;
@@ -58,16 +49,14 @@ namespace PGP.Utils
 
     public static void SetValues<TKey, TValue>(this Dictionary<TKey, TValue> dict, IEnumerable<TValue> values) {
       var keys = dict.Keys.ToList();
-      for (int i = 0; i < dict.Keys.Count; i++)
-      {
+      for (int i = 0; i < dict.Keys.Count; i++) {
         dict[keys[i]] = values.ElementAt(i);
       }
     }
 
-    public static void Shuffle<T>(this IList<T> list, FastRandom fr) {      
+    public static void Shuffle<T>(this IList<T> list, FastRandom fr) {
       int n = list.Count;
-      while (n > 1)
-      {
+      while (n > 1) {
         byte[] box = new byte[1];
         do fr.NextBytes(box);
         while (!(box[0] < n * (Byte.MaxValue / n)));
@@ -92,8 +81,7 @@ namespace PGP.Utils
 
     private static IEnumerable<T> ShuffleIterator<T>(this IEnumerable<T> source, FastRandom rng) {
       var buffer = source.ToList();
-      for (int i = 0; i < buffer.Count; i++)
-      {
+      for (int i = 0; i < buffer.Count; i++) {
         int j = rng.Next(i, buffer.Count);
         yield return buffer[j];
 
@@ -104,8 +92,7 @@ namespace PGP.Utils
     public static IEnumerable<T> SortByIndex<T>(this IEnumerable<T> source, int[] order) {
       var sorted = new List<T>();
 
-      foreach (var i in order)
-      {
+      foreach (var i in order) {
         sorted.Add(source.ElementAt(i));
       }
       return sorted;
@@ -116,8 +103,7 @@ namespace PGP.Utils
       //var constructedListType = listType.MakeGenericType(source.GetType());
       IList sorted = (IList)Activator.CreateInstance(source.GetType());
 
-      foreach (var i in order)
-      {
+      foreach (var i in order) {
         sorted.Add(source[i]);
       }
 
@@ -156,12 +142,10 @@ namespace PGP.Utils
       List<List<T>> result = new List<List<T>>();
       if (empty) result.Add(new List<T>());
 
-      for (int i = 1; i <= combinationCount; i++)
-      {
+      for (int i = 1; i <= combinationCount; i++) {
         // make each combo here
         result.Add(new List<T>());
-        for (int j = 0; j < list.Count; j++)
-        {
+        for (int j = 0; j < list.Count; j++) {
           if ((i >> j) % 2 != 0)
             result.Last().Add(list[j]);
         }
@@ -171,8 +155,7 @@ namespace PGP.Utils
     }
   }
 
-  public static class FastRandomExtesions
-  {
+  public static class FastRandomExtesions {
     public static double NextDouble(this FastRandom rnd, double lowerBound, double upperBound) {
       //var half_min = lowerBound / 2.0;
       //var half_max = upperBound / 2.0;
@@ -181,7 +164,7 @@ namespace PGP.Utils
       //return (2.0 * rnd.NextDouble() - 1.0) * factor + average;
 
       double average = lowerBound / 2.0 + upperBound / 2.0;
-      return (2.0 * rnd.NextDouble() - 1.0) * (upperBound-average) + average;      
+      return (2.0 * rnd.NextDouble() - 1.0) * (upperBound - average) + average;
     }
 
     public static double NextGaussian_BoxMuller(this FastRandom rnd, double mean = 0.0, double stdDev = 1.0) {
@@ -202,8 +185,7 @@ namespace PGP.Utils
     public static double NextGaussian_Polar(this FastRandom rnd) {
       double u1 = 0.0, u2 = 0.0, q = 0.0, p = 0.0;
 
-      do
-      {
+      do {
         u1 = rnd.NextDouble(-1.0, 1.0);
         u2 = rnd.NextDouble(-1.0, 1.0);
         q = u1 * u1 + u2 * u2;
@@ -216,8 +198,7 @@ namespace PGP.Utils
     public static double[] NextGaussians_Polar(this FastRandom rnd) {
       double u1 = 0.0, u2 = 0.0, q = 0.0, p = 0.0;
 
-      do
-      {
+      do {
         u1 = rnd.NextDouble(-1.0, 1.0);
         u2 = rnd.NextDouble(-1.0, 1.0);
         q = u1 * u1 + u2 * u2;
@@ -228,8 +209,7 @@ namespace PGP.Utils
     }
   }
 
-  public static class StackExtensions
-  {
+  public static class StackExtensions {
     public static Stack<T> Clone1<T>(this Stack<T> original) {
       return new Stack<T>(new Stack<T>(original));
     }

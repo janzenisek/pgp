@@ -1,9 +1,7 @@
 ﻿using System.Collections;
 
-namespace PGP.Core
-{
-  public class RPN<T> : List<T>, ICloneable
-  {
+namespace PGP.Core {
+  public class RPN<T> : List<T>, ICloneable {
     public double PearsonR { get; set; }
     public double NMSE { get; set; }
     public double MAE { get; set; }
@@ -43,10 +41,10 @@ namespace PGP.Core
       this.Capacity = capacity;
       EstimatedResults = new double[initialEvaluationCapacity];
       TrueResults = new double[initialEvaluationCapacity];
-    }    
+    }
 
     public RPN(IEnumerable<T> items, int capacity, double[] estimatedResults, double[] trueResults, double pearsonR, double nmse, double mae, double mre) : base(items) {
-      this.Capacity = capacity;      
+      this.Capacity = capacity;
       EstimatedResults = new double[estimatedResults.Length];
       TrueResults = new double[trueResults.Length];
       PearsonR = pearsonR;
@@ -69,8 +67,8 @@ namespace PGP.Core
 
     // copying all symbols, without results
     public RPN<T> CloneDeep() {
-      var arr = new T[this.Count];      
-      this.CopyTo(arr, 0);          
+      var arr = new T[this.Count];
+      this.CopyTo(arr, 0);
       var clone = new RPN<T>(arr, this.Capacity, this.EstimatedResults.Length);
       clone.Capacity = this.Capacity;
       return clone;
@@ -91,12 +89,12 @@ namespace PGP.Core
 
     public T Pop() {
       T item = this[0];
-      this.RemoveAt(0);      
+      this.RemoveAt(0);
       return item;
     }
 
     public void Push(T item) {
-      this.Insert(0, item);            
+      this.Insert(0, item);
     }
 
     public override string ToString() {
@@ -104,8 +102,7 @@ namespace PGP.Core
     }
   }
 
-  public class RPNCustom<T> : IEnumerable<T>, ICloneable
-  {
+  public class RPNCustom<T> : IEnumerable<T>, ICloneable {
     public double PearsonR { get; set; }
     public double NMSE { get; set; }
     public double MAE { get; set; }
@@ -114,8 +111,7 @@ namespace PGP.Core
     public double[] EstimatedResults { get; set; }
     public double[] TrueResults { get; set; }
 
-    public T this[int idx]
-    {
+    public T this[int idx] {
       get => arr[idx];
       set => arr[idx] = value;
     }
@@ -133,7 +129,7 @@ namespace PGP.Core
 
     public RPNCustom(RPNCustom<T> rpn) {
       count = 0;
-      arr = new T[rpn.Capacity];      
+      arr = new T[rpn.Capacity];
       EstimatedResults = new double[rpn.EstimatedResults.Length];
       TrueResults = new double[rpn.TrueResults.Length];
       Array.Copy(rpn.Values, 0, arr, 0, rpn.Count);
@@ -151,7 +147,7 @@ namespace PGP.Core
 
     public RPNCustom(T[] items, int initialEvaluationCapacity) {
       count = 0;
-      arr = items;      
+      arr = items;
       EstimatedResults = new double[initialEvaluationCapacity];
       TrueResults = new double[initialEvaluationCapacity];
     }
@@ -170,14 +166,14 @@ namespace PGP.Core
       count = 0;
       arr = items;
       EstimatedResults = new double[estimatedResults.Length];
-      TrueResults = new double[trueResults.Length];      
+      TrueResults = new double[trueResults.Length];
       Array.Copy(estimatedResults, 0, EstimatedResults, 0, EstimatedResults.Length);
       Array.Copy(trueResults, 0, TrueResults, 0, TrueResults.Length);
     }
 
 
     // copying all symbol references, without results
-    public object Clone() {      
+    public object Clone() {
       return new RPNCustom<T>(this.Values, EstimatedResults.Length);
     }
 
@@ -197,15 +193,15 @@ namespace PGP.Core
     }
 
     public T Peek() {
-      return arr[count-1];
+      return arr[count - 1];
     }
 
-    public T Pop() {      
+    public T Pop() {
       return arr[--count];
     }
 
     public void Push(T item) {
-      
+
       if (count == arr.Length) {
         Array.Resize(ref arr, arr.Length + 1);
       }
@@ -229,8 +225,7 @@ namespace PGP.Core
       int originalCount = 0;
       int newCount = 0;
 
-      for(int i = 0; i < index; i++)
-      {
+      for (int i = 0; i < index; i++) {
         newArr[i] = arr[originalCount];
         newCount++;
         originalCount++;
@@ -239,8 +234,7 @@ namespace PGP.Core
         newArr[newCount] = items[i];
         newCount++;
       }
-      for(int i = originalCount; i < arr.Length; i++)
-      {
+      for (int i = originalCount; i < arr.Length; i++) {
         newArr[newCount] = arr[originalCount];
         newCount++;
         originalCount++;
@@ -257,25 +251,22 @@ namespace PGP.Core
 
     public void RemoveRange(int start, int count) {
       var newArr = new T[Capacity];
-      for(int i = 0; i < arr.Length; i++)
-      {
-        if(i < start || i >= start + count) newArr[i] = arr[i];
+      for (int i = 0; i < arr.Length; i++) {
+        if (i < start || i >= start + count) newArr[i] = arr[i];
       }
       arr = newArr;
       this.count = newArr.Length;
     }
 
     public int FindIndex(Predicate<T> match) {
-      for(int i = 0; i < arr.Length; i++)
-      {
+      for (int i = 0; i < arr.Length; i++) {
         if (match(arr[i])) return i;
       }
       return -1;
     }
 
     public int FindIndex(int start, Predicate<T> match) {
-      for (int i = start; i < arr.Length; i++)
-      {
+      for (int i = start; i < arr.Length; i++) {
         if (match(arr[i])) return i;
       }
       return -1;
@@ -285,17 +276,15 @@ namespace PGP.Core
       count = 0;
     }
 
-    public T[] Values
-    {
+    public T[] Values {
       get { return arr; }
     }
 
-    public int Count { 
+    public int Count {
       get { return count; }
     }
 
-    public int Capacity
-    {
+    public int Capacity {
       get { return arr.Length; }
     }
 
@@ -311,8 +300,7 @@ namespace PGP.Core
       return new RPN2Enumerator(this);
     }
 
-    public class RPN2Enumerator : IEnumerator<T>
-    {
+    public class RPN2Enumerator : IEnumerator<T> {
       private int position;
       private RPNCustom<T> stack;
 
@@ -321,24 +309,20 @@ namespace PGP.Core
         position = -1;
       }
 
-      Object IEnumerator.Current
-      {
-        get
-        {
+      Object IEnumerator.Current {
+        get {
           return stack.arr[position];
         }
       }
-      public T Current
-      {
-        get
-        {
+      public T Current {
+        get {
           return stack.arr[position];
 
         }
       }
 
       public void Dispose() {
-        
+
       }
 
       public bool MoveNext() {
