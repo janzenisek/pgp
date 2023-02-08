@@ -39,7 +39,7 @@ namespace PGP.Runner {
 
       Stopwatch sw = new Stopwatch();
       sw.Start();
-      pgp.Fit(trainingSet);
+      pgp.Fit(trainingSet, true);
       sw.Stop();
 
       Console.WriteLine();

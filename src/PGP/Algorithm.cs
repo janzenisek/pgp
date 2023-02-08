@@ -61,9 +61,10 @@ namespace PGP.Core {
       operatorToOperandRatio = 1.0 * Operators.All.Count / Operators.All.Sum(x => x.Arity);
     }
 
-    public void Fit(Set trainingData) {
+    public void Fit(Set trainingData, bool initialize = true) {
       var data = trainingData.GetArray(VariableIndices.Keys.ToList());
-      Initialize(trainingData, data);
+
+      if(initialize) Initialize(trainingData, data);
 
       if (UseParallelization) RunParallel(trainingData, data);
       else Run(trainingData, data);
