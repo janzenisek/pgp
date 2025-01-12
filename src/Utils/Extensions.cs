@@ -54,7 +54,7 @@ namespace PGP.Utils {
       }
     }
 
-    public static void Shuffle<T>(this IList<T> list, FastRandom fr) {
+    public static IEnumerable<T> Shuffle<T>(this IList<T> list, FastRandom fr) {
       int n = list.Count;
       while (n > 1) {
         byte[] box = new byte[1];
@@ -66,6 +66,8 @@ namespace PGP.Utils {
         list[k] = list[n];
         list[n] = value;
       }
+
+      return list;
     }
 
     public static IEnumerable<T> ShuffleFisherYates<T>(this IEnumerable<T> source) {

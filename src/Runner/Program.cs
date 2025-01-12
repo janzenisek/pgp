@@ -29,17 +29,28 @@ namespace PGP.Runner {
       Set trainingSet = trainingSetOriginalOrder.Shuffle(fr);
 
       // configure gp
-      int generations = 1000;
-      int populationSize = 100;
-      var pgp = new PgpAlgorithm(fr, inputVariables, targetVariable, variableIndices, variableLimitDict, generations, populationSize, 25, elites: 1);
+      var pgp = new PgpAlgorithm(randomNumberGenerator:fr,
+        inputVariables:inputVariables,
+        targetVariable:targetVariable,
+        variableIndices:variableIndices,
+        variableLimitsDict:variableLimitDict,
+        generations:1000,
+        populationSize:100,
+        treeLength:100,
+        crossoverRate:1,
+        mutationRate:0.25,
+        maximumSelectionPressure:100,
+        elites:1);
 
       // configure algorithm
       pgp.LogGenerations = true;
       pgp.UseParallelization = true;
+      pgp.UseConstantOptimization= true;
 
       Stopwatch sw = new Stopwatch();
       sw.Start();
       pgp.Fit(trainingSet, true);
+      
       sw.Stop();
 
       Console.WriteLine();

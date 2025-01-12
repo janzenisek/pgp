@@ -1,6 +1,7 @@
 ﻿using PGP.Data;
 using PGP.Utils;
 using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 
 namespace PGP.Core {
   public class PgpAlgorithm {
@@ -31,16 +32,18 @@ namespace PGP.Core {
     public bool UseParallelization { get; set; }
     public bool LogGenerations { get; set; }
     public int EvaluationCount { get; private set; }
+    public bool UseConstantOptimization { get; set; }
 
 
-    public PgpAlgorithm(FastRandom fr, IEnumerable<string> inputVariables, string targetVariable, Dictionary<string, int> variableIndices, Dictionary<string, Tuple<double, double>> variableLimitsDict,
+
+    public PgpAlgorithm(FastRandom randomNumberGenerator, IEnumerable<string> inputVariables, string targetVariable, Dictionary<string, int> variableIndices, Dictionary<string, Tuple<double, double>> variableLimitsDict,
       int generations = 1000, int populationSize = 1000, int treeLength = 50, double crossoverRate = 1.0, double mutationRate = 0.25, double maximumSelectionPressure = 200, int elites = 1) {
       locker = new object();
       bestSolutionLocker = new object();
       evaluationBuffer = new Stack<double>(treeLength * 2);
 
 
-      rng = fr;
+      rng = randomNumberGenerator;
       InputVariables = inputVariables.ToList();
       TargetVariable = targetVariable;
       VariableIndices = variableIndices;
@@ -129,10 +132,20 @@ namespace PGP.Core {
               populationNew[i] = Mutate(populationNew[i]);
             }
 
+
+
             // Evaluate
             //double f = EvaluateSet(populationNew[i], doubleSet, trainingData.RowCount, TargetVariable);            
             double f = EvaluateSet(populationNew[i], localEvaluationBuffer, data, trainingData.RowCount, targetVariableIdx);
             localEvaluationCount++;
+
+            // perform constant optimization
+            if (!double.IsNaN(f) && UseConstantOptimization && rng.NextDouble() < 0.1) {
+              var optimizationResult = OptimizeConstants(populationNew[i], localEvaluationBuffer, data, trainingData.RowCount, targetVariableIdx);
+              populationNew[i] = optimizationResult.Item1;
+              f = optimizationResult.Item2;
+            }
+
 
             if (!double.IsNaN(f)) {
               //if (f > Math.Min(f1, f2)) { // OS              
@@ -170,7 +183,7 @@ namespace PGP.Core {
 
         EvaluationCount += generationalEvaluationCount;
 
-        if (LogGenerations) Console.WriteLine($"Generation: {g:d4}, Evaluations: {generationalEvaluationCount:d4}, Selection Pressure: {currentSelectionPressure:f2}, Score: {bestFitScore:f4}");
+        if (LogGenerations) Console.WriteLine($"Generation: {g:d4}, Evaluations: {generationalEvaluationCount:d4}, Selection Pressure: {currentSelectionPressure:f2}, Score: {bestFitScore:f12}");
       }
     }
 
@@ -210,6 +223,13 @@ namespace PGP.Core {
           double f = EvaluateSet(populationNew[i], evaluationBuffer, data, trainingData.RowCount, targetVariableIdx);
           generationalEvaluationCount++;
 
+          // perform constant optimization
+          if (!double.IsNaN(f) && UseConstantOptimization && rng.NextDouble() < 0.1) {
+            var optimizationResult = OptimizeConstants(populationNew[i], evaluationBuffer, data, trainingData.RowCount, targetVariableIdx);
+            populationNew[i] = optimizationResult.Item1;
+            f = optimizationResult.Item2;
+          }
+
           if (!double.IsNaN(f)) {
             //if (f > Math.Min(f1, f2)) { // OS            
             if (f > bestFitScore) {
@@ -238,7 +258,7 @@ namespace PGP.Core {
 
         EvaluationCount += generationalEvaluationCount;
 
-        if (LogGenerations) Console.WriteLine($"Generation: {g:d4}, Evaluations: {generationalEvaluationCount:d4}, Selection Pressure: {currentSelectionPressure:f2}, Score: {bestFitScore:f4}");
+        if (LogGenerations) Console.WriteLine($"Generation: {g:d4}, Evaluations: {generationalEvaluationCount:d4}, Selection Pressure: {currentSelectionPressure:f2}, Score: {bestFitScore:f12}");
       }
     }
 
@@ -610,6 +630,76 @@ namespace PGP.Core {
       p.EstimatedResults[idx] = result;
       return p.TrueResults[idx] - result;
     }
+
+    public Tuple<RPN<Symbol>, double> OptimizeConstants(RPN<Symbol> o, Stack<double> localEvaluationBuffer, double[] data, int trainingDataRowCount, int targetVariableIdx) {      
+      var p = o.CloneDeep();
+      double pFit = EvaluateSet(p, localEvaluationBuffer, data, trainingDataRowCount, targetVariableIdx);
+      var pNew = p.CloneDeep();
+      var pNewFit = pFit;
+
+      var constantsAndIndices = ParseConstants(p);
+      var constants = constantsAndIndices.Item1;
+      var indices = constantsAndIndices.Item2;
+      var constantsNew = (double[])constants.Clone();
+
+      double[] mutationRates = Enumerable.Range(0, constants.Length).Select(x => 0.1).ToArray();
+      int[] executionOrder = Enumerable.Range(0, constants.Length).ToArray();
+
+      for(int g = 0; g < 10; g++) {
+        executionOrder = executionOrder.ShuffleFisherYates(rng).ToArray();
+        for(int i = 0; i < indices.Length; i++) {
+          var idx = executionOrder[i];
+
+          var pMutated = pNew.CloneDeep();
+          var constantMutated = constantsNew[idx] * mutationRates[idx];                    
+          UpdateConstant(pMutated, constantMutated, indices[idx]);
+          var pMutatedFit = EvaluateSet(pMutated, localEvaluationBuffer, data, trainingDataRowCount, targetVariableIdx);
+
+          if(pMutatedFit > pNewFit) { // Pearson R ... i.e. larger number = better
+            constantsNew[idx] = constantMutated;
+            UpdateConstant(pNew, constantMutated, indices[idx]);
+            mutationRates[idx] *= 1.5;
+            pNewFit = pMutatedFit;
+          } else {
+            mutationRates[idx] *= Math.Pow(1.5, -0.25); // 1.5^-(1/4)
+          }
+        }
+      }
+
+      // sanity check and final swap
+      pNewFit = EvaluateSet(pNew, localEvaluationBuffer, data, trainingDataRowCount, targetVariableIdx);
+      if(pNewFit > pFit) { // Pearson R ... i.e. larger number = better
+        p = pNew;
+        pFit = pNewFit;
+      }
+      return Tuple.Create(p, pFit);
+    }
+
+    private Tuple<double[], int[]> ParseConstants(RPN<Symbol> p) {
+      var constants = new List<double>();
+      var indices = new List<int>();
+
+      for(int i = 0; i < p.Count; i++) {
+        var s = p[i];
+        if(s.Type == SymbolType.Constant) {
+          constants.Add(s.Con.Value);
+          indices.Add(i);
+        }
+      }
+
+      return Tuple.Create(constants.ToArray(), indices.ToArray());      
+    }
+
+    private void UpdateConstants(RPN<Symbol> p, double[] constants, int[] indices) {
+      for(int i = 0; i < indices.Length; i++) {
+        p[indices[i]].Con.Value = constants[i];
+      }
+    }
+
+    private void UpdateConstant(RPN<Symbol> p, double constant, int index) {
+      p[index].Con.Value = constant;
+    }
+
   }
 
 }
