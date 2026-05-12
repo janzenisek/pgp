@@ -158,27 +158,33 @@
       var xl = x.ToList();
       var yl = y.ToList();
 
+      if (xl.Count != yl.Count || xl.Count == 0) return -1.0;
+
       var mx = xl.Average();
       var my = yl.Average();
 
-      double num = 0.0, den = 0.0, den1 = 0.0, den2 = 0.0;
+      double num = 0.0, den1 = 0.0, den2 = 0.0;
       for (int i = 0; i < xl.Count; i++) {
-        num += (xl[i] - mx) * (yl[i] - my);
-        den1 += (xl[i] - mx) * (xl[i] - mx);
-        den2 += (yl[i] - my) * (yl[i] - my);
+        double dx = xl[i] - mx;
+        double dy = yl[i] - my;
+        num  += dx * dy;
+        den1 += dx * dx;
+        den2 += dy * dy;
       }
-      den = Math.Sqrt(den1 * den2);
+      double den = Math.Sqrt(den1 * den2);
 
       if (den == 0 || double.IsNaN(den) || double.IsInfinity(den) || double.IsNaN(num) || double.IsInfinity(num)) {
-        //Console.WriteLine($"{num}  /  {den}");
         return -1.0;
       }
 
-      return num / den;
+      return Math.Clamp(num / den, -1.0, 1.0);
     }
 
     public static double PearsonR(IEnumerable<double> x, IEnumerable<double> y) {
-      return Covariance(x, y) / (x.StandardDeviation() * y.StandardDeviation());
+      // Delegate to PearsonRFast to ensure consistent formula:
+      // Covariance() uses sample (÷n-1) while StandardDeviation() uses population (÷n),
+      // mixing them would scale the result by n/(n-1) instead of yielding true Pearson R.
+      return PearsonRFast(x, y);
     }
 
     public static double Spearman(IEnumerable<double> x, IEnumerable<double> y) {
@@ -186,6 +192,32 @@
       var yr = GetRanks(y);
 
       return Covariance(xr, yr) / (xr.StandardDeviation() * yr.StandardDeviation());
+    }
+
+    public static double NMSE(IEnumerable<double> actual, IEnumerable<double> predicted) {
+      var al = actual.ToList();
+      var pl = predicted.ToList();
+      if (pl.Count != al.Count || pl.Count == 0) return double.NaN;
+      double mse = 0.0;
+      double var = 0.0;
+      double mean = al.Average();
+      for (int i = 0; i < pl.Count; i++) {
+        mse += Math.Pow(pl[i] - al[i], 2);
+        var += Math.Pow(al[i] - mean, 2);
+      }
+      if (var == 0.0) return double.NaN;
+      return mse / var;
+    }
+
+    public static double MRE(IEnumerable<double> actual, IEnumerable<double> predicted) {
+      var al = actual.ToList();
+      var pl = predicted.ToList();
+      if (pl.Count != al.Count || pl.Count == 0) return double.NaN;
+      double mre = 0.0;
+      for (int i = 0; i < pl.Count; i++) {
+        mre += Math.Abs(pl[i] - al[i]);
+      }
+      return mre / pl.Count;
     }
 
     public static long GetBinomealCoefficient(long N, long K) {

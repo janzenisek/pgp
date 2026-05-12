@@ -24,8 +24,21 @@ namespace PGP.Core {
       , 2, "*", "Multiplication");
     public static Operator Division = new Operator(
       x => x.Pop() / x.Pop() // insecure, possibly delivers NaNs
-      //x => x.Pop() / (x.Peek() != 0 ? x.Pop() : x.Pop() + 1) // secured version
       , 2, "/", "Division");
+    public static Operator ProtectedDivision = new Operator(
+      x => {
+        double denominator = x.Pop();
+        double numerator = x.Pop();
+        return denominator != 0 ? numerator / denominator : 1.0; // protected division
+      }
+      , 2, "pd", "ProtectedDivision");
+    public static Operator AnalyticQuotient = new Operator(
+      x => {
+        double denominator = x.Pop();
+        double numerator = x.Pop();
+        return numerator / Math.Sqrt(1.0 + denominator * denominator); // analytic quotient
+      }
+      , 2, "aq", "AnalyticQuotient");
     public static Operator Sine = new Operator(
       x => Math.Sin(x.Pop())
       , 1, "sin", "Sine");
@@ -39,24 +52,39 @@ namespace PGP.Core {
       x => Math.Tanh(x.Pop())
       , 1, "tanh", "HyperbolicTangent");
     public static Operator Logarithm = new Operator(
-      x => Math.Log(x.Pop()) // insecure, possibly delivers NaNs
-      //x => Math.Log(Math.Abs(x.Peek() != 0 ? x.Pop() : x.Pop() + 1)) // secured version
+      x => Math.Log(x.Pop()) // insecure, possibly delivers NaNs      
       , 1, "log", "Logarithm");
+    public static Operator ProtectedLogarithm = new Operator(
+      x => {
+        double value = x.Pop();
+        return value > 0 ? Math.Log(value) : 0.0; // protected logarithm
+      }
+      , 1, "plog", "ProtectedLogarithm");
     public static Operator Exponential = new Operator(
       x => Math.Exp(x.Pop())
       , 1, "exp", "Exponential");
+    public static Operator ProtectedExponential = new Operator(
+      x => {
+        double value = x.Pop();
+        return Math.Exp(Math.Min(Math.Max(value, -100), 100)); // protected exponential
+      }
+      , 1, "pexp", "ProtectedExponential");
 
     public static List<Operator> All = new() {
       Addition
       ,Subtraction
       ,Multiplication
-      ,Division
+      //,Division
+      //,ProtectedDivision
+      ,AnalyticQuotient
       ,Sine
       ,Cosine
       ,Tangent
       ,HyperbolicTangent
       //,Logarithm
+      ,ProtectedLogarithm
       //,Exponential
+      ,ProtectedExponential
     };
 
     public static Operator SelectRandom(FastRandom rng) {
@@ -132,8 +160,12 @@ namespace PGP.Core {
     public Symbol(Operator opr) { Opr = opr; Type = SymbolType.Operator; }
 
     public override string ToString() {
-      //string s = 
-      return Type == SymbolType.Variable ? "v" : Type == SymbolType.Constant ? "c" : "op" + Opr.Arity;
+      return Type == SymbolType.Variable ? $"{Var.Name}*{Var.Coefficient:f2}" : Type == SymbolType.Constant ? $"{Con.Value:f2}" : Opr.Symbol;
+      //return Type == SymbolType.Variable ? "v" : Type == SymbolType.Constant ? "c" : "op" + Opr.Arity;
+    }
+
+    public string ToReadableString() {
+      return Type == SymbolType.Variable ? Var.Name : Type == SymbolType.Constant ? Con.Name : Opr.Symbol;
     }
   }
 

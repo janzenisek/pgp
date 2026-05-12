@@ -7,6 +7,8 @@ namespace PGP.Core {
     public double MAE { get; set; }
     public double MRE { get; set; }
 
+    public double LD { get; set; } // description length = L(H) + L(D|H) = length of the expression + length of the data given the expression, where the latter is estimated by NMSE
+
     public double[] EstimatedResults { get; set; }
     public double[] TrueResults { get; set; }
 
@@ -30,6 +32,7 @@ namespace PGP.Core {
       NMSE = rpn.NMSE;
       MAE = rpn.MAE;
       MRE = rpn.MRE;
+      LD = rpn.LD;
       Array.Copy(rpn.EstimatedResults, 0, EstimatedResults, 0, EstimatedResults.Length);
       Array.Copy(rpn.TrueResults, 0, TrueResults, 0, TrueResults.Length);
       //int bCount = sizeof(double) * EstimatedResults.Length;
@@ -43,7 +46,7 @@ namespace PGP.Core {
       TrueResults = new double[initialEvaluationCapacity];
     }
 
-    public RPN(IEnumerable<T> items, int capacity, double[] estimatedResults, double[] trueResults, double pearsonR, double nmse, double mae, double mre) : base(items) {
+    public RPN(IEnumerable<T> items, int capacity, double[] estimatedResults, double[] trueResults, double pearsonR, double nmse, double mae, double mre, double ld) : base(items) {
       this.Capacity = capacity;
       EstimatedResults = new double[estimatedResults.Length];
       TrueResults = new double[trueResults.Length];
@@ -51,6 +54,7 @@ namespace PGP.Core {
       NMSE = nmse;
       MAE = mae;
       MRE = mre;
+      LD = ld;
       Array.Copy(estimatedResults, 0, EstimatedResults, 0, EstimatedResults.Length);
       Array.Copy(trueResults, 0, TrueResults, 0, TrueResults.Length);
     }
@@ -78,7 +82,7 @@ namespace PGP.Core {
     public RPN<T> CloneDeepWithResults() {
       var arr = new T[this.Count];
       this.CopyTo(arr, 0);
-      var clone = new RPN<T>(arr, this.Capacity, this.EstimatedResults, this.TrueResults, PearsonR, NMSE, MAE, MRE);
+      var clone = new RPN<T>(arr, this.Capacity, this.EstimatedResults, this.TrueResults, PearsonR, NMSE, MAE, MRE, LD);
       clone.Capacity = this.Capacity;
       return clone;
     }
@@ -99,6 +103,55 @@ namespace PGP.Core {
 
     public override string ToString() {
       return String.Join(' ', this.Select(x => x.ToString()));
+    }
+
+    public string ToInfixString() {
+      // (expression, precedence) where higher precedence = binds tighter
+      // unary functions get int.MaxValue so they never need extra parens
+      static int Precedence(Core.Operator opr) => opr.Symbol switch {
+        "+" or "-" => 1,
+        "*" or "/" => 2,
+        _          => int.MaxValue  // unary: sin, cos, etc.
+      };
+
+      // subtraction and division are left-associative, so the right operand
+      // needs parentheses when it has equal precedence, e.g. a - (b - c)
+      static bool IsLeftAssociative(Core.Operator opr) =>
+        opr.Symbol == "-" || opr.Symbol == "/";
+
+      var stack = new Stack<(string Expr, int Prec)>();
+
+      foreach (var item in this) {
+        if (item is Core.Symbol symbol) {
+          if (symbol.Type == Core.SymbolType.Operator) {
+            int arity = symbol.Opr.Arity;
+            if (arity == 1) {
+              var (expr, _) = stack.Pop();
+              stack.Push(($"{symbol.Opr.Symbol}({expr})", int.MaxValue));
+            } else {
+              int prec = Precedence(symbol.Opr);
+              var (rightExpr, rightPrec) = stack.Pop();
+              var (leftExpr,  leftPrec)  = stack.Pop();
+
+              // wrap left if its precedence is strictly lower
+              string l = leftPrec < prec ? $"({leftExpr})" : leftExpr;
+
+              // wrap right if its precedence is lower, or equal for left-assoc ops
+              bool wrapRight = rightPrec < prec ||
+                               (rightPrec == prec && IsLeftAssociative(symbol.Opr));
+              string r = wrapRight ? $"({rightExpr})" : rightExpr;
+
+              stack.Push(($"{l} {symbol.Opr.Symbol} {r}", prec));
+            }
+          } else {
+            stack.Push((symbol.ToString(), int.MaxValue));
+          }
+        } else {
+          stack.Push((item?.ToString() ?? "", int.MaxValue));
+        }
+      }
+
+      return stack.Count == 1 ? stack.Pop().Expr : String.Join(' ', stack.Select(x => x.Expr));
     }
   }
 

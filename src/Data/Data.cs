@@ -32,8 +32,7 @@ namespace PGP.Data {
 
     public string Name { get; set; }
     public string Description { get; set; }
-    public double Version { get; set; }
-    public string Path { get; set; }
+    public string Version { get; set; }
 
     public int RowCount { get { return Series.Max(x => x.Value.Values.Count); } }
 
@@ -116,7 +115,6 @@ namespace PGP.Data {
       clone.Name = Name;
       clone.Description = Description;
       clone.Version = Version;
-      clone.Path = Path;
 
       clone.Series = new Dictionary<string, ISeries>();
       foreach (var s in Series) {
@@ -207,5 +205,4 @@ namespace PGP.Data {
       return clone;
     }
   }
-
 }
