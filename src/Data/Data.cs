@@ -28,15 +28,40 @@ namespace PGP.Data {
     public abstract object Clone();
   }
 
-  public class Set : Source {
+  public class DataSet : Source {
 
     public string Name { get; set; }
     public string Description { get; set; }
     public string Version { get; set; }
 
-    public int RowCount { get { return Series.Max(x => x.Value.Values.Count); } }
+    public int RowCount { get { return Series.Max(x => x.Value.Values.Count); } }    
 
     public Dictionary<string, ISeries> Series { get; set; }
+
+    public DataSet() {
+      Series = new Dictionary<string, ISeries>();
+    }
+
+    public DataSet(string id, string parentId) : base(id, parentId) {
+      Series = new Dictionary<string, ISeries>();
+    }
+
+    public DataSet(DataSet ds) : base(ds) {
+      Series = new Dictionary<string, ISeries>();
+    }
+    public override object Clone() {
+      var clone = new DataSet(this);
+      clone.Name = Name;
+      clone.Description = Description;
+      clone.Version = Version;
+
+      clone.Series = new Dictionary<string, ISeries>();
+      foreach (var s in Series) {
+        clone.Series.Add(s.Key, (ISeries)s.Value.Clone());
+      }
+
+      return clone;
+    }
 
     public Dictionary<string, Series<double>> GetDoubleSet() {
       var doubleSet = new Dictionary<string, Series<double>>();
@@ -75,8 +100,8 @@ namespace PGP.Data {
       return s;
     }
 
-    public Set Subset(int start, int count) {
-      var s = (Set)this.Clone();
+    public DataSet Subset(int start, int count) {
+      var s = (DataSet)this.Clone();
 
       foreach (var ser in Series.Keys) {
         if (s.Series[ser].DataType == typeof(double)) s.Series[ser].Values = ((List<double>)s.Series[ser].Values).GetRange(start, count);
@@ -87,8 +112,8 @@ namespace PGP.Data {
       return s;
     }
 
-    public Set Shuffle(FastRandom fr) {
-      var s = (Set)this.Clone();
+    public DataSet Shuffle(FastRandom fr) {
+      var s = (DataSet)this.Clone();
 
       foreach (var ser in s.Series) ser.Value.Values.Clear();
       var order = Enumerable.Range(0, RowCount).ToList();
@@ -110,30 +135,15 @@ namespace PGP.Data {
       return arr;
     }
 
-    public override object Clone() {
-      var clone = new Set(this);
-      clone.Name = Name;
-      clone.Description = Description;
-      clone.Version = Version;
-
-      clone.Series = new Dictionary<string, ISeries>();
-      foreach (var s in Series) {
-        clone.Series.Add(s.Key, (ISeries)s.Value.Clone());
+    public Dictionary<string, Tuple<double, double>> GetDoubleSetLimits() {
+      var dict = new Dictionary<string, Tuple<double, double>>();
+      foreach (var s in Series.Values.Where(x => x.DataType == typeof(double))) {
+        var doubleSeries = (Series<double>)s;
+        var min = doubleSeries.Values.Min();
+        var max = doubleSeries.Values.Max();
+        dict.Add(doubleSeries.Name, Tuple.Create(min, max));
       }
-
-      return clone;
-    }
-
-    public Set() {
-      Series = new Dictionary<string, ISeries>();
-    }
-
-    public Set(string id, string parentId) : base(id, parentId) {
-      Series = new Dictionary<string, ISeries>();
-    }
-
-    public Set(Set set) : base(set) {
-      Series = new Dictionary<string, ISeries>();
+      return dict;
     }
   }
 
@@ -204,5 +214,43 @@ namespace PGP.Data {
 
       return clone;
     }
+  }
+
+  public enum Metric {
+    PearsonR = 0,
+    NMSE = 1,
+    MRE = 2,
+    LD = 3
+  }
+
+  public enum OptimizationDirection {
+    Maximize,
+    Minimize
+  }
+
+  public class ModelingTask {
+    public string Name { get; set; }
+    public string TargetVariable { get; set; }
+    public IList<string> InputVariables { get; set; }
+    public Metric Metric { get; set; }
+    public OptimizationDirection OptimizationDirection { get; set; }
+    public Dictionary<string, int> VariableIndices { get; private set; }    
+    public Dictionary<string, Tuple<double, double>> VariableLimitsDict { get; set; }
+
+    private ModelingTask() { }
+
+     public ModelingTask(string name, string targetVariable, IList<string> inputVariables, Metric metric = Metric.NMSE, OptimizationDirection optimizationDirection = OptimizationDirection.Minimize) {
+      Name = name;
+      TargetVariable = targetVariable;
+      InputVariables = inputVariables;
+      Metric = metric;
+      OptimizationDirection = optimizationDirection;
+
+      var variables = inputVariables.Append(targetVariable).ToList();
+      VariableIndices = variables
+        .Select((x, i) => new { Item = x, Index = i })
+        .ToDictionary(x => x.Item, x => x.Index);
+      VariableLimitsDict = new Dictionary<string, Tuple<double, double>>();
+    }   
   }
 }

@@ -18,7 +18,7 @@ namespace PGP.Runner {
         .Select((x, i) => new { Item = x, Index = i })
         .ToDictionary(x => x.Item, x => x.Index);
       //Set ds = ProtoDataReader.ReadDataset_Numeric(Datasets["Resinet"], allVariables);
-      Set ds = ProtoDataReader.ReadDataset_Numeric(Datasets["GeoTorus"], allVariables);
+      DataSet ds = ProtoDataReader.ReadDataset_Numeric(Datasets["GeoTorus"], allVariables);
       var dds = ds.GetDoubleSet();
       var variableLimitDict = new Dictionary<string, Tuple<double, double>>();
 
@@ -28,16 +28,21 @@ namespace PGP.Runner {
         variableLimitDict.Add(s.Value.Name, Tuple.Create(min, max));
       }
 
-      Set trainingSetOriginalOrder = ds.Subset(0, 1000);            
-      Set trainingSet = trainingSetOriginalOrder.Shuffle(fr);
+      // configure data set and modeling task
+      DataSet trainingSetOriginalOrder = ds.Subset(0, 1000);            
+      DataSet trainingSet = trainingSetOriginalOrder.Shuffle(fr);
+      ModelingTask modelingTask = new ModelingTask(
+        name: "GeoTorus_Volume",
+        targetVariable: targetVariable,
+        inputVariables: inputVariables,
+        metric: Metric.PearsonR,
+        optimizationDirection: OptimizationDirection.Maximize
+      );
+      modelingTask.VariableLimitsDict = trainingSetOriginalOrder.GetDoubleSetLimits();
 
       // configure gp
       var pgp = new PgpAlgorithm(randomNumberGenerator:fr,
-        inputVariables:inputVariables,
-        targetVariable:targetVariable,
-        variableIndices:variableIndices,
-        variableLimitsDict:variableLimitDict,
-        generations:200,
+        generations:500,
         populationSize:100,
         treeLength:50,
         crossoverRate:1.0,
@@ -46,13 +51,12 @@ namespace PGP.Runner {
         elites:1);
 
       // configure algorithm
-      pgp.LogGenerations = true;
-      pgp.UseParallelization = true;
-      pgp.UseConstantOptimization= false;
+      pgp.LogStatistics = true;
+      pgp.UseParallelization = true;      
 
       Stopwatch sw = new Stopwatch();
       sw.Start();
-      pgp.Fit(trainingSet, true);      
+      pgp.Fit(modelingTask, trainingSet, true);      
       sw.Stop();
 
       Console.WriteLine();

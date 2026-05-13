@@ -18,8 +18,8 @@ namespace PGP.Data {
 
 
   public static class ProtoDataReader {
-    public static Set ReadDataset(string filepath, Dictionary<string, Tuple<SupportedSeriesTypes, string>> vardict) {
-      var s = new Set(Utils.Misc.GenerateId(10), null);
+    public static DataSet ReadDataset(string filepath, Dictionary<string, Tuple<SupportedSeriesTypes, string>> vardict) {
+      var s = new DataSet(Utils.Misc.GenerateId(10), null);
       s.Name = Path.GetFileNameWithoutExtension(filepath);
 
       s.Series = new Dictionary<string, ISeries>();
@@ -68,8 +68,8 @@ namespace PGP.Data {
       return s;
     }
 
-    public static Set ReadDataset_Numeric(string filepath, List<string> variables, int? n = null) {
-      var s = new Set(Utils.Misc.GenerateId(10), null);
+    public static DataSet ReadDataset_Numeric(string filepath, List<string> variables, int? n = null) {
+      var s = new DataSet(Utils.Misc.GenerateId(10), null);
       s.Name = Path.GetFileNameWithoutExtension(filepath);
       s.Series = new Dictionary<string, ISeries>();
 
@@ -103,7 +103,7 @@ namespace PGP.Data {
       return dict;
     }
 
-    public static void WriteDataset(string filepath, Set ds) {
+    public static void WriteDataset(string filepath, DataSet ds) {
       using (var sw = new StreamWriter(filepath)) {
         sw.WriteLine(string.Join(";", ds.Series.Values.Select(x => x.Name)));
 

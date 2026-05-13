@@ -74,16 +74,16 @@ namespace PGP.Core {
       Addition
       ,Subtraction
       ,Multiplication
-      //,Division
-      //,ProtectedDivision
+      //,Division // depr: insecure
+      //,ProtectedDivision // depr: impricise
       ,AnalyticQuotient
       ,Sine
       ,Cosine
       ,Tangent
       ,HyperbolicTangent
-      //,Logarithm
+      //,Logarithm // depr: insecure
       ,ProtectedLogarithm
-      //,Exponential
+      //,Exponential // depr: insecure
       ,ProtectedExponential
     };
 
