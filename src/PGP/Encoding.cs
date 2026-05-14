@@ -69,19 +69,21 @@ namespace PGP.Core {
       return new RPN<T>(this);
     }
 
-    // copying all symbols, without results
+    // deep-copying all symbols (mutable Variable/Constant state), without results
     public RPN<T> CloneDeep() {
       var arr = new T[this.Count];
-      this.CopyTo(arr, 0);
+      for (int i = 0; i < this.Count; i++)
+        arr[i] = (this[i] is Symbol s) ? (T)(object)s.Clone() : this[i];
       var clone = new RPN<T>(arr, this.Capacity, this.EstimatedResults.Length);
       clone.Capacity = this.Capacity;
       return clone;
     }
 
-    // copying all symbols with results
+    // deep-copying all symbols with results
     public RPN<T> CloneDeepWithResults() {
       var arr = new T[this.Count];
-      this.CopyTo(arr, 0);
+      for (int i = 0; i < this.Count; i++)
+        arr[i] = (this[i] is Symbol s) ? (T)(object)s.Clone() : this[i];
       var clone = new RPN<T>(arr, this.Capacity, this.EstimatedResults, this.TrueResults, PearsonR, NMSE, MAE, MRE, LD);
       clone.Capacity = this.Capacity;
       return clone;

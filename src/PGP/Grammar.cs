@@ -126,6 +126,8 @@ namespace PGP.Core {
       Index = index;
       Coefficient = coefficient;
     }
+
+    public Variable Clone() => new Variable(Name, Index, Coefficient);
   }
 
   public class Constant {
@@ -136,6 +138,8 @@ namespace PGP.Core {
       Name = name;
       Value = value;
     }
+
+    public Constant Clone() => new Constant(Name, Value);
   }
 
   // base type node
@@ -159,8 +163,16 @@ namespace PGP.Core {
     public Symbol(Constant con) { Con = con; Type = SymbolType.Constant; }
     public Symbol(Operator opr) { Opr = opr; Type = SymbolType.Operator; }
 
+    // Operators are stateless (immutable lambdas) and shared by design — only
+    // Variable and Constant carry mutable state and must be deep-copied.
+    public Symbol Clone() => Type switch {
+      SymbolType.Variable => new Symbol(Var.Clone()),
+      SymbolType.Constant => new Symbol(Con.Clone()),
+      _                   => new Symbol(Opr)   // Operator is immutable, safe to share
+    };
+
     public override string ToString() {
-      return Type == SymbolType.Variable ? $"{Var.Name}*{Var.Coefficient:f2}" : Type == SymbolType.Constant ? $"{Con.Value:f2}" : Opr.Symbol;
+      return Type == SymbolType.Variable ? Var.Coefficient != 1.0 ? $"{Var.Name}*{Var.Coefficient:f2}" : $"{Var.Name}" : Type == SymbolType.Constant ? $"{Con.Value:f2}" : Opr.Symbol;
       //return Type == SymbolType.Variable ? "v" : Type == SymbolType.Constant ? "c" : "op" + Opr.Arity;
     }
 

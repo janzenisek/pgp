@@ -228,6 +228,135 @@ namespace PGP.Data {
     Minimize
   }
 
+  public interface IScore {
+    string Name { get; }
+    Metric Metric { get; }
+    OptimizationDirection Direction { get; }
+
+    double GetMaxValue();
+    double GetMinValue();
+    double GetOptimum();
+    double GetPessimal();
+    bool IsBetter(double score1, double score2);
+    double GetScoreSum(double[] scores);
+    double GetScoreCummulative(double score);
+    public double ComputeScore(double[] trueResults, double[] estimatedResults);
+  }
+
+  public class PearsonR : IScore {
+    public string Name { get => "PearsonR"; }
+    public Metric Metric { get => Metric.PearsonR; }
+    public OptimizationDirection Direction { get => OptimizationDirection.Maximize; }
+
+    public double GetMaxValue() {
+      return 1.0;
+    }
+
+    public double GetMinValue() {
+      return -1.0;
+    }
+
+    public double GetOptimum() {
+      return 1.0;
+    }
+
+    public double GetPessimal() {
+      return -1.0;
+    }
+
+    public bool IsBetter(double score1, double score2) {
+      return score1 > score2;
+    }
+
+    public double GetScoreSum(double[] scores) { 
+      return scores.Sum();
+    }
+
+    public double GetScoreCummulative(double score) {
+      return score;
+    }
+
+    public double ComputeScore(double[] trueResults, double[] estimatedResults) {
+      return Statistics.PearsonRFast(trueResults, estimatedResults);
+    }
+  }
+
+  public class NMSE : IScore {
+    public string Name { get => "NMSE"; }
+    public Metric Metric { get => Metric.NMSE; }
+    public OptimizationDirection Direction { get => OptimizationDirection.Minimize; }
+
+    public double GetMaxValue() {
+      return double.MaxValue;
+    }
+
+    public double GetMinValue() {
+      return 0.0;
+    }
+
+    public double GetOptimum() {
+      return 0.0;
+    }
+
+    public double GetPessimal() {
+      return double.MaxValue;
+    }
+
+    public bool IsBetter(double score1, double score2) {
+      return score1 < score2;
+    }
+
+    public double GetScoreSum(double[] scores) {
+      return scores.Select(s => 1.0 / (1.0 + s)).Sum();
+    }
+
+    public double GetScoreCummulative(double score) {
+      return 1.0 / (1.0 + score);
+    }
+
+    public double ComputeScore(double[] trueResults, double[] estimatedResults) {
+      return Statistics.NMSE(trueResults, estimatedResults);
+    }
+  }
+
+  public class LD : IScore {
+    public string Name { get => "LD"; }
+    public Metric Metric { get => Metric.LD; }
+    public OptimizationDirection Direction { get => OptimizationDirection.Minimize; }
+
+    public double GetMaxValue() {
+      return double.MaxValue;
+    }
+
+    public double GetMinValue() {
+      return 0.0;
+    }
+
+    public double GetOptimum() {
+      return 0.0;
+    }
+
+    public double GetPessimal() {
+      return double.MaxValue;
+    }
+
+    public bool IsBetter(double score1, double score2) {
+      return score1 < score2;
+    }
+
+    public double GetScoreSum(double[] scores) {
+      return scores.Select(s => 1.0 / (1.0 + s)).Sum();
+    }
+
+    public double GetScoreCummulative(double score) {
+      return 1.0 / (1.0 + score);
+    }
+
+    public double ComputeScore(double[] trueResults, double[] estimatedResults) {
+      return Statistics.NMSE(trueResults, estimatedResults); // TODO: Implement actual LD computation
+    }
+  }
+
   public class ModelingTask {
     public string Name { get; set; }
     public string TargetVariable { get; set; }
@@ -236,6 +365,7 @@ namespace PGP.Data {
     public OptimizationDirection OptimizationDirection { get; set; }
     public Dictionary<string, int> VariableIndices { get; private set; }    
     public Dictionary<string, Tuple<double, double>> VariableLimitsDict { get; set; }
+    public IScore Score { get; private set; }
 
     private ModelingTask() { }
 
@@ -251,6 +381,20 @@ namespace PGP.Data {
         .Select((x, i) => new { Item = x, Index = i })
         .ToDictionary(x => x.Item, x => x.Index);
       VariableLimitsDict = new Dictionary<string, Tuple<double, double>>();
+
+      switch (metric) {
+        case Metric.PearsonR:
+          Score = new PearsonR();
+          break;
+        case Metric.NMSE:
+          Score = new NMSE();
+          break;
+        case Metric.LD:
+          Score = new LD();
+          break;
+        default:
+          throw new NotImplementedException($"Metric {metric} not implemented yet.");
+      }
     }   
   }
 }

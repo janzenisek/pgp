@@ -35,16 +35,17 @@ namespace PGP.Runner {
         name: "GeoTorus_Volume",
         targetVariable: targetVariable,
         inputVariables: inputVariables,
-        metric: Metric.PearsonR,
-        optimizationDirection: OptimizationDirection.Maximize
+        metric: Metric.NMSE,
+        optimizationDirection: OptimizationDirection.Minimize
       );
       modelingTask.VariableLimitsDict = trainingSetOriginalOrder.GetDoubleSetLimits();
 
       // configure gp
       var pgp = new PgpAlgorithm(randomNumberGenerator:fr,
-        generations:500,
+        generations:100,
         populationSize:100,
-        treeLength:50,
+        symbolCount:25,
+        nestingDepth:10,
         crossoverRate:1.0,
         mutationRate:0.25,
         maximumSelectionPressure:1000,
@@ -52,11 +53,14 @@ namespace PGP.Runner {
 
       // configure algorithm
       pgp.LogStatistics = true;
-      pgp.UseParallelization = true;      
+      pgp.UseParallelization = true;
+      pgp.PerformCoefficentOptimization = true;
+      pgp.PerformConstantOptimization = true;
+      pgp.PerformSimplification = true;
 
       Stopwatch sw = new Stopwatch();
       sw.Start();
-      pgp.Fit(modelingTask, trainingSet, true);      
+      pgp.Fit(modelingTask, trainingSet);      
       sw.Stop();
 
       Console.WriteLine();
