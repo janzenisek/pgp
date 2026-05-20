@@ -29,7 +29,7 @@ namespace PGP.Runner {
       }
 
       // configure data set and modeling task
-      DataSet trainingSetOriginalOrder = ds.Subset(0, 1000);            
+      DataSet trainingSetOriginalOrder = ds.Subset(0, 100);           
       DataSet trainingSet = trainingSetOriginalOrder.Shuffle(fr);
       ModelingTask modelingTask = new ModelingTask(
         name: "GeoTorus_Volume",
@@ -46,7 +46,7 @@ namespace PGP.Runner {
         populationSize:100,
         symbolCount:25,
         nestingDepth:10,
-        crossoverRate:1.0,
+        crossoverRate:0.9,
         mutationRate:0.25,
         maximumSelectionPressure:1000,
         elites:1);
@@ -57,10 +57,21 @@ namespace PGP.Runner {
       pgp.PerformCoefficentOptimization = true;
       pgp.PerformConstantOptimization = true;
       pgp.PerformSimplification = true;
+      pgp.OptimizationIterations = 10;
 
+      Console.WriteLine("Starting GPSR...");
+      Console.WriteLine("(press any key to stop computation)\n");
+      
       Stopwatch sw = new Stopwatch();
       sw.Start();
-      pgp.Fit(modelingTask, trainingSet);      
+      bool k = false;
+      Task t = pgp.Fit(modelingTask, trainingSet);     
+      
+      while (!k && !t.IsCompleted) {
+        k = Console.KeyAvailable;
+        t.Wait(100);
+      }      
+
       sw.Stop();
 
       Console.WriteLine();
