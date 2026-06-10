@@ -31,7 +31,7 @@ namespace PGP.Runner {
       // configure data set and modeling task
       DataSet trainingSetOriginalOrder = ds.Subset(0, 100);           
       DataSet trainingSet = trainingSetOriginalOrder.Shuffle(fr);
-      ModelingTask modelingTask = new ModelingTask(
+      Core.Task modelingTask = new Core.Task(
         name: "GeoTorus_Volume",
         targetVariable: targetVariable,
         inputVariables: inputVariables,
@@ -63,14 +63,18 @@ namespace PGP.Runner {
       Console.WriteLine("(press any key to stop computation)\n");
       
       Stopwatch sw = new Stopwatch();
-      sw.Start();
       bool k = false;
-      Task t = pgp.Fit(modelingTask, trainingSet);     
+      var cts = new CancellationTokenSource();
+      sw.Start();
+      System.Threading.Tasks.Task t = pgp.Fit(modelingTask, trainingSet, cts.Token);     
       
       while (!k && !t.IsCompleted) {
         k = Console.KeyAvailable;
         t.Wait(100);
-      }      
+      }
+
+      cts.Cancel();
+      t.Wait(1000);      
 
       sw.Stop();
 

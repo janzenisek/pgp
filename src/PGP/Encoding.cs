@@ -2,15 +2,21 @@
 
 namespace PGP.Core {
   public class RPN<T> : List<T>, ICloneable {
+
+    public double Score { get; set; }
     public double PearsonR { get; set; }
     public double NMSE { get; set; }
     public double MAE { get; set; }
     public double MRE { get; set; }
-
     public double LD { get; set; } // description length = L(H) + L(D|H) = length of the expression + length of the data given the expression, where the latter is estimated by NMSE
 
     public double[] EstimatedResults { get; set; }
     public double[] TrueResults { get; set; }
+
+    // Cached compiled delegate produced by EvaluateProgram.
+    // Nulled by CloneDeep (structure changes after crossover/mutation).
+    // Preserved by CloneDeepWithResults and the shallow Clone overloads (structure unchanged).
+    public Func<double[], int, double>? CompiledDelegate { get; set; }
 
 
     //public RPN() : base() {
@@ -59,33 +65,40 @@ namespace PGP.Core {
       Array.Copy(trueResults, 0, TrueResults, 0, TrueResults.Length);
     }
 
-    // copying all symbol references, without results
+    // copying all symbol references, without results — structure unchanged, carry delegate
     public object Clone() {
-      return new RPN<T>(this, this.Capacity, this.EstimatedResults.Length);
+      var clone = new RPN<T>(this, this.Capacity, this.EstimatedResults.Length);
+      clone.CompiledDelegate = CompiledDelegate;
+      return clone;
     }
 
-    // copying all symbol references, with results
+    // copying all symbol references, with results — structure unchanged, carry delegate
     public object CloneWithResults() {
-      return new RPN<T>(this);
+      var clone = new RPN<T>(this);
+      clone.CompiledDelegate = CompiledDelegate;
+      return clone;
     }
 
     // deep-copying all symbols (mutable Variable/Constant state), without results
+    // structure will change after crossover/mutation — delegate is invalidated
     public RPN<T> CloneDeep() {
       var arr = new T[this.Count];
       for (int i = 0; i < this.Count; i++)
         arr[i] = (this[i] is Symbol s) ? (T)(object)s.Clone() : this[i];
       var clone = new RPN<T>(arr, this.Capacity, this.EstimatedResults.Length);
       clone.Capacity = this.Capacity;
+      // CompiledDelegate intentionally not copied: structure may change
       return clone;
     }
 
-    // deep-copying all symbols with results
+    // deep-copying all symbols with results — structure unchanged, carry delegate
     public RPN<T> CloneDeepWithResults() {
       var arr = new T[this.Count];
       for (int i = 0; i < this.Count; i++)
         arr[i] = (this[i] is Symbol s) ? (T)(object)s.Clone() : this[i];
       var clone = new RPN<T>(arr, this.Capacity, this.EstimatedResults, this.TrueResults, PearsonR, NMSE, MAE, MRE, LD);
       clone.Capacity = this.Capacity;
+      clone.CompiledDelegate = CompiledDelegate;
       return clone;
     }
 

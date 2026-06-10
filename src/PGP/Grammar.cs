@@ -69,6 +69,8 @@ namespace PGP.Core {
         return Math.Exp(Math.Min(Math.Max(value, -100), 100)); // protected exponential
       }
       , 1, "pexp", "ProtectedExponential");
+    public static Operator Pi = new Operator(
+      x => x.Pop() * Math.PI, 1, "pi", "Pi");
 
     public static List<Operator> All = new() {
       Addition
@@ -85,6 +87,7 @@ namespace PGP.Core {
       ,ProtectedLogarithm
       //,Exponential // depr: insecure
       ,ProtectedExponential
+      ,Pi
     };
 
     public static Operator SelectRandom(FastRandom rng) {
