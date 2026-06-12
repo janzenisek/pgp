@@ -40,7 +40,7 @@ namespace PGP.Runner {
       );
       modelingTask.VariableLimitsDict = trainingSetOriginalOrder.GetDoubleSetLimits();
 
-      // configure gp
+      // configure gp hyperparameters
       var pgp = new PgpAlgorithm(randomNumberGenerator:fr,
         generations:100,
         populationSize:100,
@@ -51,7 +51,10 @@ namespace PGP.Runner {
         maximumSelectionPressure:1000,
         elites:1);
 
-      // configure algorithm
+      // configure gp operators
+      pgp.Select = Selection.TournamentSelection;
+
+      // configure algorithm options
       pgp.LogStatistics = true;
       pgp.UseParallelization = true;
       pgp.PerformCoefficentOptimization = true;

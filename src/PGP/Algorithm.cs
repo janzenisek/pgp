@@ -142,8 +142,7 @@ namespace PGP.Core {
       SymbolCount = symbolCount;
       NestingDepth = nestingDepth;
 
-      Selection.Rng = Rng;
-      Select = Selection.ProportionalSelection;
+      Selection.Rng = Rng;      
 
       UseParallelization = false;
       LogStatistics = false;

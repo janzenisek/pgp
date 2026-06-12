@@ -32,14 +32,14 @@ namespace PGP.Core {
     }
 
 
-    public static int tournamentSize = 3;
-    public static Tuple<RPN<Symbol>, int> TournamentSelection(List<RPN<Symbol>> population, Task task) {      
+    public static int tournamentSize = 5;
+    public static Tuple<RPN<Symbol>, int> TournamentSelection(RPN<Symbol>[] population, Task task) {      
       var tournament = new List<Tuple<RPN<Symbol>, int, double>>();
       for (int j = 0; j < tournamentSize; j++) {
-        int idx = Rng.Next(population.Count);
+        int idx = Rng.Next(population.Length);
         tournament.Add(Tuple.Create(population[idx], idx, fitScores[idx]));
       }      
-      var best = tournament.OrderByDescending(p => task.Score.Compute(p.Item1)).First();
+      var best = tournament.OrderBy(p => p.Item3).First();
 
       return Tuple.Create(best.Item1, best.Item2);
     } 
