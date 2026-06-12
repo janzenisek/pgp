@@ -29,7 +29,7 @@ namespace PGP.Runner {
       }
 
       // configure data set and modeling task
-      DataSet trainingSetOriginalOrder = ds.Subset(0, 100);           
+      DataSet trainingSetOriginalOrder = ds.Subset(0, 1000);           
       DataSet trainingSet = trainingSetOriginalOrder.Shuffle(fr);
       Core.Task modelingTask = new Core.Task(
         name: "GeoTorus_Volume",

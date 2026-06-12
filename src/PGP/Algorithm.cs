@@ -77,7 +77,7 @@ namespace PGP.Core {
     public int NestingDepth { get; set; }
 
     // GP Operators
-    public Func<RPN<Symbol>[], Task, Tuple<RPN<Symbol>, int>> Select { get; set; }
+    public Func<RPN<Symbol>[], Task, Tuple<RPN<Symbol>, int>> Select { get; set; } = Selection.ProportionalSelection;
     public Func<RPN<Symbol>, Task, RPN<Symbol>> Mutate { get; set; }
     public Func<RPN<Symbol>, Task, double> Evaluate { get; set; }
 

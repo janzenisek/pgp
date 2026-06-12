@@ -32,39 +32,15 @@ namespace PGP.Core {
     }
 
 
-
-    public static List<RPN<Symbol>> RouletteWheelSelection(List<RPN<Symbol>> population, IScore score) {
-      var selected = new List<RPN<Symbol>>();
-      var random = new Random();
-      var scores = population.Select(p => score.Compute(p)).ToArray();
-      var totalScore = scores.Sum();
-      for (int i = 0; i < population.Count; i++) {
-        var pick = random.NextDouble() * totalScore;
-        var cumulative = 0.0;
-        for (int j = 0; j < population.Count; j++) {
-          cumulative += scores[j];
-          if (cumulative > pick) {
-            selected.Add(population[j]);
-            break;
-          }
-        }
-      }
-      return selected;
-    }
-
-    public static List<RPN<Symbol>> TournamentSelection(List<RPN<Symbol>> population, IScore score, int tournamentSize) {
-      var selected = new List<RPN<Symbol>>();
-      var random = new Random();
-      for (int i = 0; i < population.Count; i++) {
-        var tournament = new List<RPN<Symbol>>();
-        for (int j = 0; j < tournamentSize; j++) {
-          tournament.Add(population[random.Next(population.Count)]);
-        }
-        var best = tournament.OrderByDescending(p => score.Compute(p)).First();
-        selected.Add(best);
-      }
-      return selected;
-    }
+    public static int tournamentSize = 3;
+    public static Tuple<RPN<Symbol>, int> TournamentSelection(List<RPN<Symbol>> population, Task task) {      
+      var tournament = new List<Tuple<RPN<Symbol>, int>>();
+      for (int j = 0; j < tournamentSize; j++) {
+        int idx = Rng.Next(population.Count);
+        tournament.Add(Tuple.Create(population[idx], idx));
+      }      
+      return tournament.OrderByDescending(p => task.Score.Compute(p.Item1)).First();
+    } 
 
   }
 }
