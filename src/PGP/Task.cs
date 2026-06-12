@@ -9,9 +9,10 @@ namespace PGP.Core {
 
   public enum Metric {
     PearsonR = 0,
-    NMSE = 1,
-    MRE = 2,
-    LD = 3
+    PearsonR2 = 1,
+    NMSE = 2,
+    MRE = 3,
+    LD = 4
   }
 
   public enum OptimizationDirection {
@@ -69,13 +70,60 @@ namespace PGP.Core {
     }    
 
     public static double ComputeScore(RPN<Symbol> p) {
-      return Statistics.PearsonRFast(p.TrueResults, p.EstimatedResults);
+      double r = Statistics.PearsonRFast(p.TrueResults, p.EstimatedResults);
+      p.PearsonR = r;
+      return r;
     }
 
     public double Compute(RPN<Symbol> p) {
       return ComputeScore(p);
     }
   }
+
+  public class PearsonR2 : IScore {
+    public string Name { get => "PearsonR2"; }
+    public Metric Metric { get => Metric.PearsonR2; }
+    public OptimizationDirection Direction { get => OptimizationDirection.Maximize; }
+
+    public double GetMaxValue() {
+      return 1.0;
+    }
+
+    public double GetMinValue() {
+      return 0.0;
+    }
+
+    public double GetOptimum() {
+      return 1.0;
+    }
+
+    public double GetPessimal() {
+      return 0.0;
+    }
+
+    public bool IsBetter(double score1, double score2) {
+      return score1 > score2;
+    }
+
+    public double GetScoreSum(double[] scores) {
+      return scores.Sum();
+    }
+
+    public double GetScoreCummulative(double score) {
+      return score;
+    }
+
+    public static double ComputeScore(RPN<Symbol> p) {
+      double r = Statistics.PearsonRFast(p.TrueResults, p.EstimatedResults);
+      p.PearsonR2 = r * r;
+      return p.PearsonR2;
+    }
+
+    public double Compute(RPN<Symbol> p) {
+      return ComputeScore(p);
+    }
+  }
+
 
   public class NMSE : IScore {
     public string Name { get => "NMSE"; }
@@ -111,7 +159,9 @@ namespace PGP.Core {
     }    
 
     public static double ComputeScore(RPN<Symbol> p) {
-      return Statistics.NMSE(p.TrueResults, p.EstimatedResults);
+      double nmse = Statistics.NMSE(p.TrueResults, p.EstimatedResults);
+      p.NMSE = nmse;
+      return nmse;
     }
 
     public double Compute(RPN<Symbol> p) {

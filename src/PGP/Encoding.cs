@@ -5,6 +5,7 @@ namespace PGP.Core {
 
     public double Score { get; set; }
     public double PearsonR { get; set; }
+    public double PearsonR2 { get; set; }
     public double NMSE { get; set; }
     public double MAE { get; set; }
     public double MRE { get; set; }
