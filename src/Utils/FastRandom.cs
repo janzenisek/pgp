@@ -320,6 +320,13 @@ namespace PGP.Utils {
       return (bitBuffer & (bitMask >>= 1)) == 0;
     }
 
+    public double NextDouble(double lowerBound, double upperBound) {
+      if (lowerBound > upperBound)
+        throw new ArgumentOutOfRangeException("upperBound", upperBound, "upperBound must be >=lowerBound");
+      double range = upperBound - lowerBound;
+      return lowerBound + NextDouble() * range;
+    }
+
     #endregion
   }
 }

@@ -264,7 +264,7 @@ namespace PGP.Core {
       // Σ (rᵢ/σ)² genuinely discriminates between good and bad fits — a model
       // that fits poorly accumulates a large quadratic penalty, not just a small
       // logarithmic one.
-      int n = p.TrueResults.Length;
+      int n = p.TrueResults.Count;
 
       double yMean = 0.0;
       for (int i = 0; i < n; i++) yMean += p.TrueResults[i];

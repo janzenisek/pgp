@@ -52,7 +52,9 @@ namespace PGP.Runner {
         elites:1);
 
       // configure gp operators
+      pgp.Breed = Creation.BreedConstrained;
       pgp.Select = Selection.TournamentSelection;
+
 
       // configure algorithm options
       pgp.LogStatistics = true;

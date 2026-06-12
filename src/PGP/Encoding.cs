@@ -11,8 +11,10 @@ namespace PGP.Core {
     public double MRE { get; set; }
     public double LD { get; set; } // description length = L(H) + L(D|H) = length of the expression + length of the data given the expression, where the latter is estimated by NMSE
 
-    public double[] EstimatedResults { get; set; }
-    public double[] TrueResults { get; set; }
+    public int EvaluationCapacity { get; set; }
+
+    public List<double> EstimatedResults { get; set; }
+    public List<double> TrueResults { get; set; }
 
     // Cached compiled delegate produced by EvaluateProgram.
     // Nulled by CloneDeep (structure changes after crossover/mutation).
@@ -25,50 +27,57 @@ namespace PGP.Core {
     //  TrueResult = new List<double>();
     //}
 
-    public RPN(int capacity, int initialEvaluationCapacity) : base(capacity) {
+    public RPN(int capacity) : base(capacity) {
       this.Capacity = capacity;
-      EstimatedResults = new double[initialEvaluationCapacity];
-      TrueResults = new double[initialEvaluationCapacity];
+      EstimatedResults = new List<double>();
+      TrueResults = new List<double>();
+    }
+
+    public RPN(int capacity, int evaluationCapacity) : base(capacity) {
+      this.Capacity = capacity;
+      this.EvaluationCapacity = evaluationCapacity;
+
+      EstimatedResults = new List<double>(new double[evaluationCapacity]);
+      TrueResults = new List<double>(new double[evaluationCapacity]);
     }
 
     public RPN(RPN<T> rpn) : base(rpn) {
       this.Capacity = rpn.Capacity;
-      EstimatedResults = new double[rpn.EstimatedResults.Length];
-      TrueResults = new double[rpn.TrueResults.Length];
+      this.EvaluationCapacity = rpn.EvaluationCapacity;
+      EstimatedResults = new List<double>(rpn.EstimatedResults);
+      TrueResults = new List<double>(rpn.TrueResults);
       PearsonR = rpn.PearsonR;
       NMSE = rpn.NMSE;
       MAE = rpn.MAE;
       MRE = rpn.MRE;
       LD = rpn.LD;
-      Array.Copy(rpn.EstimatedResults, 0, EstimatedResults, 0, EstimatedResults.Length);
-      Array.Copy(rpn.TrueResults, 0, TrueResults, 0, TrueResults.Length);
       //int bCount = sizeof(double) * EstimatedResults.Length;
       //System.Buffer.BlockCopy(rpn.EstimatedResults, 0, EstimatedResults, 0, bCount);
       //System.Buffer.BlockCopy(rpn.TrueResults, 0, TrueResults, 0, bCount);
     }
 
-    public RPN(IEnumerable<T> items, int capacity, int initialEvaluationCapacity) : base(items) {
+    public RPN(IEnumerable<T> items, int capacity, int evaluationCapacity) : base(items) {
       this.Capacity = capacity;
-      EstimatedResults = new double[initialEvaluationCapacity];
-      TrueResults = new double[initialEvaluationCapacity];
+      this.EvaluationCapacity = evaluationCapacity;
+      EstimatedResults = new List<double>(new double[evaluationCapacity]);
+      TrueResults = new List<double>(new double[evaluationCapacity]);
     }
 
-    public RPN(IEnumerable<T> items, int capacity, double[] estimatedResults, double[] trueResults, double pearsonR, double nmse, double mae, double mre, double ld) : base(items) {
+    public RPN(IEnumerable<T> items, int capacity, int evaluationCapacity, List<double> estimatedResults, List<double> trueResults, double pearsonR, double nmse, double mae, double mre, double ld) : base(items) {
       this.Capacity = capacity;
-      EstimatedResults = new double[estimatedResults.Length];
-      TrueResults = new double[trueResults.Length];
+      this.EvaluationCapacity = evaluationCapacity;
+      EstimatedResults = new List<double>(estimatedResults);
+      TrueResults = new List<double>(trueResults);
       PearsonR = pearsonR;
       NMSE = nmse;
       MAE = mae;
       MRE = mre;
       LD = ld;
-      Array.Copy(estimatedResults, 0, EstimatedResults, 0, EstimatedResults.Length);
-      Array.Copy(trueResults, 0, TrueResults, 0, TrueResults.Length);
     }
 
     // copying all symbol references, without results — structure unchanged, carry delegate
     public object Clone() {
-      var clone = new RPN<T>(this, this.Capacity, this.EstimatedResults.Length);
+      var clone = new RPN<T>(this, this.Capacity, this.EstimatedResults.Count);
       clone.CompiledDelegate = CompiledDelegate;
       return clone;
     }
@@ -86,7 +95,7 @@ namespace PGP.Core {
       var arr = new T[this.Count];
       for (int i = 0; i < this.Count; i++)
         arr[i] = (this[i] is Symbol s) ? (T)(object)s.Clone() : this[i];
-      var clone = new RPN<T>(arr, this.Capacity, this.EstimatedResults.Length);
+      var clone = new RPN<T>(arr, this.Capacity, this.EvaluationCapacity);
       clone.Capacity = this.Capacity;
       // CompiledDelegate intentionally not copied: structure may change
       return clone;
@@ -97,8 +106,7 @@ namespace PGP.Core {
       var arr = new T[this.Count];
       for (int i = 0; i < this.Count; i++)
         arr[i] = (this[i] is Symbol s) ? (T)(object)s.Clone() : this[i];
-      var clone = new RPN<T>(arr, this.Capacity, this.EstimatedResults, this.TrueResults, PearsonR, NMSE, MAE, MRE, LD);
-      clone.Capacity = this.Capacity;
+      var clone = new RPN<T>(arr, this.Capacity, this.EvaluationCapacity, this.EstimatedResults, this.TrueResults, PearsonR, NMSE, MAE, MRE, LD);
       clone.CompiledDelegate = CompiledDelegate;
       return clone;
     }

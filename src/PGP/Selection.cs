@@ -32,7 +32,7 @@ namespace PGP.Core {
     }
 
 
-    public static int tournamentSize = 5;
+    public static int tournamentSize = 3;
     public static Tuple<RPN<Symbol>, int> TournamentSelection(RPN<Symbol>[] population, Task task) {      
       var tournament = new List<Tuple<RPN<Symbol>, int, double>>();
       for (int j = 0; j < tournamentSize; j++) {

@@ -40,7 +40,7 @@ namespace PGP.Core {
   public class PgpAlgorithm {
     private FastRandom seedRng;
     private ThreadLocal<FastRandom> rng;
-    private FastRandom Rng => rng.Value;
+    public FastRandom Rng => rng.Value;
     private Stack<double> evaluationBuffer;
     private RPN<Symbol>[] population;
 
@@ -56,16 +56,18 @@ namespace PGP.Core {
     private static readonly System.Reflection.MethodInfo _miMax   = typeof(Math).GetMethod(nameof(Math.Max),   new[] { typeof(double), typeof(double) })!;
     private static readonly System.Reflection.MethodInfo _miIsNaN = typeof(double).GetMethod(nameof(double.IsNaN), new[] { typeof(double) })!;
 
-    private double operatorToOperandRatio;
     private object locker;
     private object bestSolutionLocker;
 
     private int targetVariableIdx;
     private Dictionary<string, Tuple<double, double>> variableLimitsDict;
 
-    private Task mt;
-    private Store store;
+    // General
+    public Task Task { get; set; }
+    public DataSet DataSet { get; set; }
+    public Store Store { get; set; }
 
+    
     // GP Settings
     public int Generations { get; set; }
     public int PopulationSize { get; set; }
@@ -75,9 +77,12 @@ namespace PGP.Core {
     public int Elites { get; set; }
     public int SymbolCount { get; set; }
     public int NestingDepth { get; set; }
+    public double OperatorToOperandRatio { get; set; }
+
 
     // GP Operators
-    public Func<RPN<Symbol>[], Task, Tuple<RPN<Symbol>, int>> Select { get; set; } = Selection.ProportionalSelection;
+    public Func<PgpAlgorithm, RPN<Symbol>> Breed { get; set; } = Creation.BreedConstrained;
+    public Func<RPN<Symbol>[], Task, Tuple<RPN<Symbol>, int>> Select { get; set; } = Selection.TournamentSelection;
     public Func<RPN<Symbol>, Task, RPN<Symbol>> Mutate { get; set; }
     public Func<RPN<Symbol>, Task, double> Evaluate { get; set; }
 
@@ -101,11 +106,11 @@ namespace PGP.Core {
     public double MinLength => population.Min(x => x.Count);
     public double MinLD => population.Min(x => x.LD);
 
-    public string BestProgram => population.OrderBy(x => OrderByScore(x, mt.Metric)).First().ToInfixString();
-    public string BestProgramRPN => population.OrderBy(x => OrderByScore(x, mt.Metric)).First().ToString();
-    public double BestProgramPearsonR => population.OrderBy(x => OrderByScore(x, mt.Metric)).First().PearsonR;
-    public double BestProgramNMSE => population.OrderBy(x => OrderByScore(x, mt.Metric)).First().NMSE;
-    public double BestProgramLD => population.OrderBy(x => OrderByScore(x, mt.Metric)).First().LD;
+    public string BestProgram => population.OrderBy(x => OrderByScore(x, Task.Metric)).First().ToInfixString();
+    public string BestProgramRPN => population.OrderBy(x => OrderByScore(x, Task.Metric)).First().ToString();
+    public double BestProgramPearsonR => population.OrderBy(x => OrderByScore(x, Task.Metric)).First().PearsonR;
+    public double BestProgramNMSE => population.OrderBy(x => OrderByScore(x, Task.Metric)).First().NMSE;
+    public double BestProgramLD => population.OrderBy(x => OrderByScore(x, Task.Metric)).First().LD;
     public double MeanPearsonR => population.Average(x => x.PearsonR);
     public double MedianPearsonR => population.Select(x => x.PearsonR).Median();
     public double MeanLength => population.Average(x => x.Count);
@@ -148,29 +153,52 @@ namespace PGP.Core {
       LogStatistics = false;
 
       population = new RPN<Symbol>[PopulationSize];
-      operatorToOperandRatio = 1.0 * Operators.All.Count / Operators.All.Sum(x => x.Arity);
+      OperatorToOperandRatio = 1.0 * Operators.All.Count / Operators.All.Sum(x => x.Arity);
     }
 
 
     
     #region Fit and Run
 
-    public async System.Threading.Tasks.Task Fit(Task modelingTask, DataSet trainingData, CancellationToken ct) {
+    public async System.Threading.Tasks.Task Fit(Task task, DataSet trainingData, CancellationToken ct) {
       // setup alg-internal data representation
-      mt = modelingTask;
-      var data = trainingData.GetArray(modelingTask.VariableIndices.Keys.ToList());
-      targetVariableIdx = modelingTask.VariableIndices[modelingTask.TargetVariable];
+      Task = task;
+      DataSet = trainingData;
+      var data = trainingData.GetArray(task.VariableIndices.Keys.ToList());
+      targetVariableIdx = task.VariableIndices[task.TargetVariable];
 
       // create and evaluate initial population
-      await System.Threading.Tasks.Task.Run(() => Initialize(modelingTask, trainingData, data));
+      await System.Threading.Tasks.Task.Run(() => Initialize(task, trainingData, data));
 
       if(ct.IsCancellationRequested) return;
 
       // run main gp loop
       await System.Threading.Tasks.Task.Run(() => {
-        if (UseParallelization) RunParallel(modelingTask, trainingData, data, ct);
-        else Run(modelingTask, trainingData, data);
+        if (UseParallelization) RunParallel(task, trainingData, data, ct);
+        else Run(task, trainingData, data);
       });
+    }
+
+    // create and evaluate initial population
+    public void Initialize(Task modelingTask, DataSet trainingData, double[] data) {
+
+      double bestFitScore = modelingTask.Score.GetPessimal();
+      RPN<Symbol> bestSolution = null;
+
+      for (int i = 0; i < population.Length;) {
+        population[i] = Breed(this);
+        double f = EvaluateArr(population[i], evaluationBuffer, data, trainingData.RowCount, targetVariableIdx, modelingTask);
+
+        if (!double.IsNaN(f)) {
+          if (modelingTask.Score.IsBetter(f, bestFitScore)) {
+            bestSolution = (RPN<Symbol>)population[i].CloneDeepWithResults();
+            bestFitScore = f;
+          }
+          i++;
+        }
+      }
+      population[0] = (RPN<Symbol>)bestSolution.CloneDeepWithResults();
+      EvaluationCount = 0;
     }
 
     public void RunParallel(Task modelingTask, DataSet trainingData, double[] data, CancellationToken ct) {      
@@ -413,203 +441,8 @@ namespace PGP.Core {
 
     #endregion Fit and Run
 
-    #region Breeders
-
-    // create and evaluate initial population
-    public void Initialize(Task modelingTask, DataSet trainingData, double[] data) {
-
-      double bestFitScore = modelingTask.Score.GetPessimal();
-      RPN<Symbol> bestSolution = null;
-
-      for (int i = 0; i < population.Length;) {
-        //population[i] = Breed(modelingTask, trainingData.RowCount);
-        population[i] = Breed_Constrained(modelingTask, trainingData.RowCount);
-        double f = EvaluateArr(population[i], evaluationBuffer, data, trainingData.RowCount, targetVariableIdx, modelingTask);
-
-        if (!double.IsNaN(f)) {
-          if (modelingTask.Score.IsBetter(f, bestFitScore)) {
-            bestSolution = (RPN<Symbol>)population[i].CloneDeepWithResults();
-            bestFitScore = f;
-          }
-          i++;
-        }
-      }
-      population[0] = (RPN<Symbol>)bestSolution.CloneDeepWithResults();
-      EvaluationCount = 0;
-    }
 
 
-
-
-    public RPN<Symbol> Breed(Task mt, int initialEvaluationCapacity = 0) {
-      var p = new RPN<Symbol>(SymbolCount, initialEvaluationCapacity);
-      int aritySum = 0, arityCount = 0, tCount = 0;
-      int constantCounter = 0;
-      double rndD;
-
-      Symbol curSmybol = CreateTerminal(ref constantCounter, mt);
-      p.Add(curSmybol);
-      tCount++;
-
-
-      while (p.Count < SymbolCount)
-      //while (p.Count < TreeLength || (tCount > 1 || tCount == 1 && curSmybol.Type != SymbolType.Operator))
-      {
-        rndD = Rng.NextDouble();
-        if (rndD > operatorToOperandRatio) {
-          // add terminal (variable or constant) to the program leafs
-          curSmybol = CreateTerminal(ref constantCounter, mt);
-          p.Add(curSmybol);
-          tCount++;
-        }
-        else {
-          curSmybol = new Symbol(Operators.SelectRandom(Rng));
-          if (tCount >= curSmybol.Opr.Arity) {
-            tCount -= curSmybol.Opr.Arity - 1;
-            p.Add(curSmybol);
-          }
-        }
-      }
-
-      while (tCount > 1) {
-        curSmybol = new Symbol(Operators.SelectRandom(Rng));
-        if (tCount >= curSmybol.Opr.Arity) {
-          tCount -= curSmybol.Opr.Arity - 1;
-          p.Add(curSmybol);
-        }
-      }
-
-      return p;
-    }
-
-    // Constrained breed: builds a tree top-down using a recursive post-order
-    // generator. SymbolCount is a hard budget cap; NestingDepth is a hard depth
-    // cap (ignored when NestingDepth == 0). Both constraints are satisfied by
-    // construction — no rejection sampling or correction loops needed.
-    public RPN<Symbol> Breed_Constrained(Task mt, int initialEvaluationCapacity = 0) {
-      var p = new RPN<Symbol>(SymbolCount, initialEvaluationCapacity);
-      int constantCounter = 0;
-      int depthLimit = NestingDepth > 0 ? NestingDepth : int.MaxValue;
-      int budget = SymbolCount;
-      BreedSubtree(p, mt, ref constantCounter, ref budget, depthLimit);
-      return p;
-    }
-
-    // Recursively generates one valid subtree in post-order directly into p.
-    // budget: symbols remaining across the entire program (shared, passed by ref).
-    // depthRemaining: how many more levels this subtree may grow downward.
-    private void BreedSubtree(RPN<Symbol> p, Task mt, ref int constantCounter, ref int budget, int depthRemaining) {
-      // Force a terminal when the budget is exhausted or the depth cap is reached.
-      bool forceTerminal = budget <= 1 || depthRemaining <= 1;
-
-      if (!forceTerminal) {
-        // Budget-aware operator probability: large budget → strongly prefer operators
-        // so the available symbol slots are actually used.
-        //   budget=2  → pOperator = 0.50
-        //   budget=5  → pOperator = 0.80
-        //   budget=25 → pOperator = 0.96
-        double pOperator = 1.0 - 1.0 / budget;
-
-        if (Rng.NextDouble() < pOperator) {
-          int budgetSnapshot = budget;
-          var feasible = Operators.All.Where(op => budgetSnapshot >= op.Arity + 1).ToList();
-          if (feasible.Count > 0) {
-            var op = feasible[Rng.Next(feasible.Count)];
-            budget--; // consume this operator's own symbol slot
-
-            // Distribute the remaining budget among children, each receiving
-            // at least 2 symbols (so every child can itself be an operator).
-            int[] childBudgets = SplitBudget(budget, op.Arity);
-
-            for (int ci = 0; ci < op.Arity; ci++) {
-              int childAlloc = childBudgets[ci];
-              budget -= childAlloc;
-              int localBudget = childAlloc;
-              BreedSubtree(p, mt, ref constantCounter, ref localBudget, depthRemaining - 1);
-              budget += localBudget; // return unused symbols to the shared pool
-            }
-
-            p.Add(new Symbol(op));
-            return;
-          }
-        }
-      }
-
-      // Terminal (variable or constant) — always consumes exactly 1 symbol.
-      p.Add(CreateTerminal(ref constantCounter, mt));
-      budget--;
-    }
-
-    // Splits 'total' symbols into 'parts' positive integers chosen at random.
-    // Each part receives at least min(2, floor(total/parts)) symbols so that
-    // every child has a realistic chance of itself being an operator node.
-    private int[] SplitBudget(int total, int parts) {
-      int minPerPart = total >= parts * 2 ? 2 : 1; // guarantee min 2 when budget allows
-      int[] result = new int[parts];
-      int remaining = total - minPerPart * parts;   // symbols available above the minimum
-      for (int i = 0; i < parts - 1; i++) {
-        int maxExtra = remaining - (parts - 1 - i); // keep at least 1 spare per remaining part
-        int extra = maxExtra > 0 ? Rng.Next(0, maxExtra + 1) : 0;
-        result[i] = minPerPart + extra;
-        remaining -= extra;
-      }
-      result[parts - 1] = minPerPart + remaining;
-      return result;
-    }
-
-    //var startSymbol = Operators.SelectRandom(rng);
-    //p.Push(new Symbol(startSymbol));
-    ////aritySum = startSymbol.Arity;
-    //aritySum = startSymbol.Arity;
-
-    //for (int i = 1; p.Count < TreeLength; i++)
-    //{
-    //  rndD = rng.NextDouble();
-    //  if(rndD > operatorToOperandRatio)
-    //  {
-    //    // push terminal (variable or constant) to the program leafs
-    //    p.Push(GetTerminal(ref constantCounter));
-    //    aritySum--;          
-    //  }
-    //  else
-    //  {
-    //    // push operator to the program leafs
-    //    var op = new Symbol(Operators.SelectRandom(rng));
-    //    aritySum += op.Opr.Arity-1;
-    //    arityCount = op.Opr.Arity;
-    //    p.Push(op);
-    //  }
-    //}
-
-    //// (3) validate and correct
-    //while(aritySum != 0 && arityCount != 0)
-    //{
-    //  // case 1: we need terminals at leafs, since the overall arity of all preceding operations is not fullfilled 
-    //  // e.g. 2 4 + + 11 4 + /  corrected: 3 2 4 + + 11 4 + /
-    //  // case 1: we need terminals at leafs, since arity of the preceding operation is not fullfilled
-    //  // (if the overall arity is already fullfilled, this causes adding a operation to the root within the next loop iteration)
-    //  // e.g.               + 1 1 4 + 11 4 + /      ==> aritySum is  0, arityCount is 2
-    //  // 1. correction:   2 + 1 1 4 + 11 4 + /      ==> aritySum is -2, arityCount is 1
-    //  // 2. correction: 2 2 + 1 1 4 + 11 4 + /      ==> aritySum is -2, arityCount is 0
-    //  // 3. correction: 2 2 + 1 1 4 + 11 4 + / +    ==> aritySum is -1, arityCount is 0
-    //  // 4. correction: 2 2 + 1 1 4 + 11 4 + / + +  ==> aritySum is  0, arityCount is 0
-    //  if (arityCount > 0 || aritySum > 0)
-    //  {
-    //    // push terminal to begin of program (leaf)
-    //    p.Push(GetTerminal(++constantCounter));
-    //    aritySum--;
-    //    arityCount--;
-
-    //  } else if(aritySum < 0)
-    //  {          
-    //    // add operator to end of program (root)
-    //    var op = new Symbol(Operators.SelectRandom(rng));          
-    //    aritySum += op.Opr.Arity-1;
-    //    p.Add(op);
-    //  }
-    //}
-
-    #endregion Breeders
 
     #region Crossovers
 
@@ -1024,15 +857,15 @@ namespace PGP.Core {
           if (binaryOps.Count > 0) {
             var op = binaryOps[Rng.Next(binaryOps.Count)];
             int ctr = 0;
-            var newTerminal = CreateTerminal(ref ctr, mt);
+            var newTerminal = Creation.CreateTerminal(this, ref ctr);
             // insert new terminal before idx, then append operator after idx
             p.Insert(idx, newTerminal);         // new left operand before original terminal
             p.Insert(idx + 2, new Symbol(op));  // operator after the pair
           } else {
-            p[idx] = CreateVariable(mt);
+            p[idx] = Creation.CreateVariable(this);
           }
         } else {
-          p[idx] = CreateVariable(mt);
+          p[idx] = Creation.CreateVariable(this);
         }
       }
       else // operator
@@ -1740,7 +1573,7 @@ namespace PGP.Core {
       // Σ (rᵢ/σ)² genuinely discriminates between good and bad fits — a model
       // that fits poorly accumulates a large quadratic penalty, not just a small
       // logarithmic one.
-      int n = p.TrueResults.Length;
+      int n = p.TrueResults.Count;
 
       double yMean = 0.0;
       for (int i = 0; i < n; i++) yMean += p.TrueResults[i];
@@ -2022,6 +1855,7 @@ namespace PGP.Core {
     private double[] GetScores(Metric metric) {
       return metric switch {
         Metric.PearsonR => population.Select(x => x.PearsonR).ToArray(),
+        Metric.PearsonR2 => population.Select(x => x.PearsonR2).ToArray(),
         Metric.NMSE => population.Select(x => x.NMSE).ToArray(),
         Metric.MRE => population.Select(x => x.MRE).ToArray(),
         Metric.LD => population.Select(x => x.LD).ToArray(),
@@ -2036,30 +1870,6 @@ namespace PGP.Core {
       Metric.LD => p.LD,
       _ => throw new ArgumentException("Unsupported metric: " + metric)
     };
-
-    private Symbol CreateTerminal(ref int c, Task mt) {
-      double rndD = Rng.NextDouble();
-      int rndI;
-
-      if (rndD < 0.75) {
-        rndI = Rng.Next(0, mt.InputVariables.Count);
-        string varName = mt.InputVariables[rndI];
-        return new Symbol(new Variable(varName, mt.VariableIndices[varName], 1.0));
-      } else {
-        rndI = Rng.Next(0, mt.VariableLimitsDict.Count);
-        c++;
-        return new Symbol(new Constant(
-              $"c{c}",
-              Rng.NextDouble(mt.VariableLimitsDict.ElementAt(rndI).Value.Item1, mt.VariableLimitsDict.ElementAt(rndI).Value.Item2)
-            ));
-      }
-    }
-
-    private Symbol CreateVariable(Task mt) {
-      int rndI = Rng.Next(0, mt.InputVariables.Count);
-      string varName = mt.InputVariables[rndI];
-      return new Symbol(new Variable(mt.InputVariables[rndI], mt.VariableIndices[varName], 1.0));
-    }
 
     #endregion Helpers
 
