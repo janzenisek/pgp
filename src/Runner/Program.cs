@@ -29,7 +29,7 @@ namespace PGP.Runner {
       }
 
       // configure data set and modeling task
-      DataSet trainingSetOriginalOrder = ds.Subset(0, 1000);           
+      DataSet trainingSetOriginalOrder = ds.Subset(0, 100);           
       DataSet trainingSet = trainingSetOriginalOrder.Shuffle(fr);
       Core.Task modelingTask = new Core.Task(
         name: "GeoTorus_Volume",
@@ -54,13 +54,12 @@ namespace PGP.Runner {
       // configure gp operators
       pgp.Breed = Creation.BreedConstrained;
       pgp.Select = Selection.TournamentSelection;
+      pgp.Optimizer = Optimization.OptimizeCoefficientsAndConstants;
 
 
       // configure algorithm options
       pgp.LogStatistics = true;
       pgp.UseParallelization = true;
-      pgp.PerformCoefficentOptimization = true;
-      pgp.PerformConstantOptimization = true;
       pgp.PerformSimplification = true;
       pgp.OptimizationIterations = 10;
 

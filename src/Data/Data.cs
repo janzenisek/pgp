@@ -215,4 +215,12 @@ namespace PGP.Data {
       return clone;
     }
   }
+
+  public record DataRecord {
+    
+    public double[] Data { get; set; }
+    public int RowCount { get; set; }
+    public int TargetIndex { get; set; }
+    //public int[] InputIndicies { get; set; }
+  }
 }

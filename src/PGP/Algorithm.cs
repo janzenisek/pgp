@@ -65,6 +65,7 @@ namespace PGP.Core {
     // General
     public Task Task { get; set; }
     public DataSet DataSet { get; set; }
+    public DataRecord DataRecord { get; set; }
     public Store Store { get; set; }
 
     
@@ -85,14 +86,13 @@ namespace PGP.Core {
     public Func<RPN<Symbol>[], Task, Tuple<RPN<Symbol>, int>> Select { get; set; } = Selection.TournamentSelection;
     public Func<RPN<Symbol>, Task, RPN<Symbol>> Mutate { get; set; }
     public Func<RPN<Symbol>, Task, double> Evaluate { get; set; }
+    public Func<PgpAlgorithm, RPN<Symbol>, Task, DataRecord, Tuple<RPN<Symbol>, double>> Optimizer { get; set; } = Optimization.OptimizeCoefficientsAndConstants;
 
 
     // Algorithm control settings
     public int EvaluationCount { get; private set; }
     public bool LogStatistics { get; set; } = false;
     public bool UseParallelization { get; set; } = true;
-    public bool PerformConstantOptimization { get; set; } = false;
-    public bool PerformCoefficentOptimization { get; set; } = false;
     public int OptimizationIterations { get; set; } = 10;
     public bool PerformSimplification { get; set; } = false;
     public bool PerformPenalization { get; set; } = false;
@@ -120,7 +120,8 @@ namespace PGP.Core {
 
     private double OrderByScore(RPN<Symbol> p, Metric m = Metric.NMSE) { 
       return m switch {
-        Metric.PearsonR => -p.PearsonR, // negate because higher is better
+        Metric.PearsonR => 1.0-(p.PearsonR*p.PearsonR),
+        Metric.PearsonR2 => 1.0-p.PearsonR2,
         Metric.NMSE => p.NMSE,
         Metric.MRE => p.MRE,
         Metric.LD => p.LD,
@@ -166,6 +167,7 @@ namespace PGP.Core {
       DataSet = trainingData;
       var data = trainingData.GetArray(task.VariableIndices.Keys.ToList());
       targetVariableIdx = task.VariableIndices[task.TargetVariable];
+      DataRecord = new DataRecord { Data = data, RowCount = trainingData.RowCount, TargetIndex = targetVariableIdx};
 
       // create and evaluate initial population
       await System.Threading.Tasks.Task.Run(() => Initialize(task, trainingData, data));
@@ -174,8 +176,8 @@ namespace PGP.Core {
 
       // run main gp loop
       await System.Threading.Tasks.Task.Run(() => {
-        if (UseParallelization) RunParallel(task, trainingData, data, ct);
-        else Run(task, trainingData, data);
+        if (UseParallelization) RunParallel(ct);
+        else Run();
       });
     }
 
@@ -187,7 +189,7 @@ namespace PGP.Core {
 
       for (int i = 0; i < population.Length;) {
         population[i] = Breed(this);
-        double f = EvaluateArr(population[i], evaluationBuffer, data, trainingData.RowCount, targetVariableIdx, modelingTask);
+        double f = EvaluateArr(population[i], modelingTask, DataRecord);
 
         if (!double.IsNaN(f)) {
           if (modelingTask.Score.IsBetter(f, bestFitScore)) {
@@ -201,8 +203,8 @@ namespace PGP.Core {
       EvaluationCount = 0;
     }
 
-    public void RunParallel(Task modelingTask, DataSet trainingData, double[] data, CancellationToken ct) {      
-      double[] fitScores = GetScores(modelingTask.Metric);
+    public void RunParallel(CancellationToken ct) {      
+      double[] fitScores = GetScores(Task.Metric);
       double[] fitScoresNew = fitScores.ToArray(); // pre-fill so no slot is ever zero     
       RPN<Symbol>[] populationNew = population.Select(pi => (RPN<Symbol>)pi.Clone()).ToArray();
       var bestSolution = (RPN<Symbol>)population.First().CloneDeepWithResults(); // take the first (elite or random)
@@ -220,7 +222,7 @@ namespace PGP.Core {
         if (ct.IsCancellationRequested) return;
 
         int generationalEvaluationCount = 0;        
-        double sumFitScores = modelingTask.Score.GetScoreSum(fitScores);
+        double sumFitScores = Task.Score.GetScoreSum(fitScores);
         var fitScoresList = fitScores.ToList();
 
         Selection.fitScoreSum = sumFitScores;
@@ -235,8 +237,8 @@ namespace PGP.Core {
           for (int i = range.Item1; i < range.Item2 && currentSelectionPressure < MaximumSelectionPressure;) {
 
             // select
-            var c1Idx = Select(population, modelingTask).Item2;
-            var c2Idx = Select(population, modelingTask).Item2;
+            var c1Idx = Select(population, Task).Item2;
+            var c2Idx = Select(population, Task).Item2;
 
             var c1 = population[c1Idx];
             var c2 = population[c2Idx];
@@ -258,7 +260,7 @@ namespace PGP.Core {
 
             // mutate
             if (Rng.NextDouble() < MutationRate) {
-              populationNew[i] = MutateMultiCase(populationNew[i], modelingTask);
+              populationNew[i] = MutateMultiCase(populationNew[i], Task);
               var diff = populationNew[i].Count - population[i].Count;
               sizeDiffAfterMutation.Add(diff);
             }
@@ -270,18 +272,13 @@ namespace PGP.Core {
             // evaluate
             //double f = EvaluateSet(populationNew[i], doubleSet, trainingData.RowCount, TargetVariable);            
             //double f = EvaluateArr(populationNew[i], localEvaluationBuffer, data, trainingData.RowCount, targetVariableIdx, modelingTask);
-            double f = EvaluateProgram(populationNew[i], data, trainingData.RowCount, modelingTask);
+            double f = EvaluateProgram(populationNew[i], Task, DataRecord);
             localEvaluationCount++;
 
-            // constant / coefficient optimization
-            if(!double.IsNaN(f) && PerformConstantOptimization && PerformCoefficentOptimization) {              
-              var optimizationResult = OptimizeCoefficientsAndConstants(populationNew[i], localEvaluationBuffer, data, trainingData.RowCount, targetVariableIdx, modelingTask);
-              populationNew[i] = optimizationResult.Item1;
-              f = optimizationResult.Item2;
-            } else if (!double.IsNaN(f) && PerformConstantOptimization) {
-              var optimizationResult = OptimizeConstants(populationNew[i], localEvaluationBuffer, data, trainingData.RowCount, targetVariableIdx, modelingTask);
-              populationNew[i] = optimizationResult.Item1;
-              f = optimizationResult.Item2;
+            if(Optimizer != null) {
+              var optimizedResult = Optimizer(this, populationNew[i], Task, DataRecord);
+              populationNew[i] = optimizedResult.Item1;
+              f = optimizedResult.Item2;
             }
 
             // penalize
@@ -294,9 +291,9 @@ namespace PGP.Core {
 
             if (!double.IsNaN(f)) {
               //if (f > Math.Min(f1, f2)) { // OS              
-              if (modelingTask.Score.IsBetter(f, bestFitScore)) { // f > bestFitScore if Pearson R is used
+              if (Task.Score.IsBetter(f, bestFitScore)) { // f > bestFitScore if Pearson R is used
                 lock (bestSolutionLocker) {
-                  if (modelingTask.Score.IsBetter(f, bestFitScore)) { // f > bestFitScore if Pearson R is used
+                  if (Task.Score.IsBetter(f, bestFitScore)) { // f > bestFitScore if Pearson R is used
                     bestFitScore = f;
                     bestSolution = (RPN<Symbol>)populationNew[i].CloneDeepWithResults();
                   }
@@ -350,10 +347,10 @@ namespace PGP.Core {
       }
     }
 
-    public void Run(Task modelingTask, DataSet trainingData, double[] data) {
-      var score = modelingTask.Score;
+    public void Run() {
+      var score = Task.Score;
 
-      double[] fitScores = GetScores(modelingTask.Metric);
+      double[] fitScores = GetScores(Task.Metric);
       RPN<Symbol>[] populationNew = population.Select(pi => (RPN<Symbol>)pi.Clone()).ToArray();
       double[] fitScoresNew = fitScores.ToArray(); // pre-fill so no slot is ever zero
       double bestFitScore = fitScores.Aggregate((a, b) => score.IsBetter(a, b) ? a : b);
@@ -375,22 +372,22 @@ namespace PGP.Core {
         do {
           //var c1Idx = SelectProportionalIdx(fitScoresList, sumFitScores, modelingTask);
           //var c2Idx = SelectProportionalIdx(fitScoresList, sumFitScores, modelingTask);
-          var c1Idx = Select(population, modelingTask).Item2;
-          var c2Idx = Select(population, modelingTask).Item2;
+          var c1Idx = Select(population, Task).Item2;
+          var c2Idx = Select(population, Task).Item2;
           var c1 = population[c1Idx];
           var c2 = population[c2Idx];
 
           // crossover — fall back to a parent clone when no operator crosspoint exists
           var result = Cross_Constrained(c1, c2);
           if (result != null) {
-            populationNew[i] = score.IsBetter(GetScore(result.Item1, modelingTask.Metric), GetScore(result.Item2, modelingTask.Metric))
+            populationNew[i] = score.IsBetter(GetScore(result.Item1, Task.Metric), GetScore(result.Item2, Task.Metric))
                                ? result.Item1 : result.Item2;
           } else {
             populationNew[i] = (RPN<Symbol>)c1.CloneDeep(); // safe fallback: use parent
           }
 
           if (Rng.NextDouble() < MutationRate) {
-            var mutated = MutateMultiCase(populationNew[i], modelingTask);
+            var mutated = MutateMultiCase(populationNew[i], Task);
             // only accept a size-shrinking result if it is not trivially degenerate
             // (size 1 while both parents were larger means the mutation over-pruned)
             if (mutated.Count > 1 || (c1.Count == 1 && c2.Count == 1))
@@ -398,14 +395,14 @@ namespace PGP.Core {
           }
 
           // Evaluate
-          double f = EvaluateArr(populationNew[i], evaluationBuffer, data, trainingData.RowCount, targetVariableIdx, modelingTask);
+          double f = EvaluateArr(populationNew[i], Task, DataRecord);
           generationalEvaluationCount++;
 
           // perform constant optimization
-          if (!double.IsNaN(f) && PerformConstantOptimization) {
-            var optimizationResult = OptimizeConstantsViaEvolutionStrategy(populationNew[i], evaluationBuffer, data, trainingData.RowCount, targetVariableIdx, modelingTask);
-            populationNew[i] = optimizationResult.Item1;
-            f = optimizationResult.Item2;
+          if (Optimizer != null) {
+            var optimizedResult = Optimizer(this, populationNew[i], Task, DataRecord);
+            populationNew[i] = optimizedResult.Item1;
+            f = optimizedResult.Item2;
           }
 
           if (!double.IsNaN(f)) {
@@ -440,9 +437,6 @@ namespace PGP.Core {
     }
 
     #endregion Fit and Run
-
-
-
 
     #region Crossovers
 
@@ -1276,7 +1270,7 @@ namespace PGP.Core {
       return p.TrueResults[idx] - result;
     }
 
-    public double EvaluateArr(RPN<Symbol> p, Stack<double> localEvaluationBuffer, double[] data, int rowCount, int targetVariableIdx, Task modelingTask) {
+    public double EvaluateArr(RPN<Symbol> program, Task task, DataRecord data) {
 
       //// V2 parallel
       //var rangePartitioner = Partitioner.Create(0, rowCount);
@@ -1296,16 +1290,16 @@ namespace PGP.Core {
 
 
       // V0 sequential
-      for (int i = 0; i < rowCount; i++) {
+      for (int i = 0; i < data.RowCount; i++) {
         //Evaluate(p, localEvaluationBuffer, data, rowCount, i, targetVariableIdx);
-        if (double.IsNaN(EvaluateStack(p, localEvaluationBuffer, data, rowCount, i, targetVariableIdx))) return double.NaN;
+        if (double.IsNaN(EvaluateStack(program, data, i))) return double.NaN;
       }
 
-      p.PearsonR = PearsonR.ComputeScore(p);
-      p.NMSE = NMSE.ComputeScore(p);
-      p.LD = LD.ComputeScore(p);
+      program.PearsonR = PearsonR.ComputeScore(program);
+      program.NMSE = NMSE.ComputeScore(program);
+      program.LD = LD.ComputeScore(program);
 
-      return modelingTask.Score.Compute(p);
+      return task.Score.Compute(program);
 
       //p.LD = EvaluateDescriptionLength(p);
       //p.MRE = Statistics.MRE(p.TrueResults, p.EstimatedResults);      
@@ -1338,14 +1332,16 @@ namespace PGP.Core {
     //  return p.PearsonR;
     //}
 
-    public double EvaluateStack(RPN<Symbol> p, Stack<double> localEvaluationBuffer, double[] data, int rowCount, int idx, int targetVariableIdx) {
+    public double EvaluateStack(RPN<Symbol> program, DataRecord data, int ridx) {
       
-      foreach (var symbol in p) {
+      var localEvaluationBuffer = new Stack<double>();
+
+      foreach (var symbol in program) {
         if (symbol.Type == SymbolType.Constant) {
           localEvaluationBuffer.Push(symbol.Con.Value);
         }
         else if (symbol.Type == SymbolType.Variable) {
-          localEvaluationBuffer.Push(data[symbol.Var.Index * rowCount + idx] * symbol.Var.Coefficient);
+          localEvaluationBuffer.Push(data.Data[symbol.Var.Index * data.RowCount + ridx] * symbol.Var.Coefficient);
         }
         else {
           var tmpResult = symbol.Opr.Function(localEvaluationBuffer);
@@ -1375,26 +1371,26 @@ namespace PGP.Core {
       //else if (double.IsNegativeInfinity(result)) result = double.MinValue;
 
 
-      p.TrueResults[idx] = data[targetVariableIdx * rowCount + idx]; // not necessary to do this in every evaluation, but it is more convenient to have the true values stored in the program for later use (e.g. for statistics)
-      p.EstimatedResults[idx] = result;
-      return p.TrueResults[idx] - result;
+      program.TrueResults[ridx] = data.Data[targetVariableIdx * data.RowCount + ridx]; // not necessary to do this in every evaluation, but it is more convenient to have the true values stored in the program for later use (e.g. for statistics)
+      program.EstimatedResults[ridx] = result;
+      return program.TrueResults[ridx] - result;
     }
 
-    public double EvaluateProgram(RPN<Symbol> p, double[] data, int rowCount, Task t) {
+    public double EvaluateProgram(RPN<Symbol> p, Task t, DataRecord data) {
       // Compile once and cache on the program instance; reuse on every subsequent call
       // for the same individual (e.g. during constant optimisation inner loops).
       // CloneDeep (called after crossover/mutation) nulls the cache automatically.
-      p.CompiledDelegate ??= CompileToDelegate(p, rowCount);
+      p.CompiledDelegate ??= CompileToDelegate(p, data.RowCount);
       if (p.CompiledDelegate == null) return t.Score.GetPessimal();
 
       int targetIdx = t.VariableIndices[t.TargetVariable];
 
-      for (int i = 0; i < rowCount; i++) {
-        double estimated = p.CompiledDelegate(data, i);
+      for (int i = 0; i < data.RowCount; i++) {
+        double estimated = p.CompiledDelegate(data.Data, i);
         if (!double.IsFinite(estimated))
           return t.Score.GetPessimal();
 
-        p.TrueResults[i]      = data[targetIdx * rowCount + i];
+        p.TrueResults[i]      = data.Data[targetIdx * data.RowCount + i];
         p.EstimatedResults[i] = estimated;
       }
 
@@ -1617,238 +1613,6 @@ namespace PGP.Core {
     }
 
     #endregion Penalizers
-
-    #region Optimizers
-
-    public Tuple<RPN<Symbol>, double> OptimizeConstantsViaEvolutionStrategy(RPN<Symbol> o, Stack<double> localEvaluationBuffer, double[] data, int trainingDataRowCount, int targetVariableIdx, Task modelingTask) {      
-      var p = o.CloneDeep();
-      double pFit = EvaluateArr(p, localEvaluationBuffer, data, trainingDataRowCount, targetVariableIdx, modelingTask);
-      var pNew = p.CloneDeep();
-      var pNewFit = pFit;
-
-      var constantsAndIndices = ParseConstants(p);
-      var constants = constantsAndIndices.Item1;
-      var indices = constantsAndIndices.Item2;
-      var constantsNew = (double[])constants.Clone();
-
-      // Step sizes are initialised relative to each constant's magnitude so that
-      // a constant of 1000 gets a meaningful perturbation, not just ±0.1.
-      double[] stepSizes = constants.Select(c => Math.Max(Math.Abs(c) * 0.1, 0.1)).ToArray();
-      const double stepMax  = 1e4;   // hard cap — prevents runaway growth
-      const double paramMax = 1e6;   // clamp constants to [-paramMax, paramMax]
-      int[] executionOrder = Enumerable.Range(0, constants.Length).ToArray();
-
-      for(int g = 0; g < OptimizationIterations; g++) {
-        executionOrder = executionOrder.ShuffleFisherYates(Rng).ToArray();
-        for(int i = 0; i < indices.Length; i++) {
-          var idx = executionOrder[i];
-
-          // Additive perturbation: c' = c ± step  (1/5-success rule adaptation)
-          double step = stepSizes[idx];
-          double delta = Rng.NextDouble() < 0.5 ? step : -step;
-          double constantMutated = Math.Clamp(constantsNew[idx] + delta, -paramMax, paramMax);
-
-          var pMutated = pNew.CloneDeep();
-          UpdateConstant(pMutated, constantMutated, indices[idx]);
-          var pMutatedFit = EvaluateArr(pMutated, localEvaluationBuffer, data, trainingDataRowCount, targetVariableIdx, modelingTask);
-
-          if(!double.IsNaN(pMutatedFit) && modelingTask.Score.IsBetter(pMutatedFit, pNewFit)) {
-            constantsNew[idx] = constantMutated;
-            UpdateConstant(pNew, constantMutated, indices[idx]);
-            stepSizes[idx] = Math.Min(stepSizes[idx] * 1.5, stepMax); // grow step on success
-            pNewFit = pMutatedFit;
-          } else {
-            stepSizes[idx] *= Math.Pow(1.5, -0.25); // shrink step on failure
-          }
-        }
-      }
-
-      // sanity check and final swap
-      pNewFit = EvaluateArr(pNew, localEvaluationBuffer, data, trainingDataRowCount, targetVariableIdx, modelingTask);
-      if(modelingTask.Score.IsBetter(pNewFit, pFit)) {
-        p = pNew;
-        pFit = pNewFit;
-      }
-      return Tuple.Create(p, pFit);
-    }
-
-    public Tuple<RPN<Symbol>, double> OptimizeConstants(RPN<Symbol> o, Stack<double> localEvaluationBuffer, double[] data, int trainingDataRowCount, int targetVariableIdx, Task modelingTask) {
-      var p = o.CloneDeep();
-      double pFit = EvaluateArr(p, localEvaluationBuffer, data, trainingDataRowCount, targetVariableIdx, modelingTask);
-
-      var constAndIdx  = ParseConstants(p);
-      double[] constants    = constAndIdx.Item1;
-      int[]    constIndices = constAndIdx.Item2;
-
-      int n = constants.Length;
-      if (n == 0) return Tuple.Create(p, pFit);
-
-      const double h             = 1e-4;
-      const double learningRate  = 0.01;
-      int maxIterations = OptimizationIterations;
-      const double gradClip      = 1e3;  // clip individual gradient components
-      const double paramMax      = 1e6;  // clamp constants to [-paramMax, paramMax]
-      double gradientSign = modelingTask.Score.Direction == OptimizationDirection.Maximize ? 1.0 : -1.0;
-
-      for (int iter = 0; iter < maxIterations; iter++) {
-        var gradient = new double[n];
-
-        for (int i = 0; i < n; i++) {
-          var pPlus  = p.CloneDeep();
-          var pMinus = p.CloneDeep();
-
-          UpdateConstant(pPlus,  constants[i] + h, constIndices[i]);
-          UpdateConstant(pMinus, constants[i] - h, constIndices[i]);
-
-          double fPlus  = EvaluateArr(pPlus,  localEvaluationBuffer, data, trainingDataRowCount, targetVariableIdx, modelingTask);
-          double fMinus = EvaluateArr(pMinus, localEvaluationBuffer, data, trainingDataRowCount, targetVariableIdx, modelingTask);
-          if (double.IsNaN(fPlus) || double.IsNaN(fMinus)) continue;
-          gradient[i] = Math.Clamp((fPlus - fMinus) / (2.0 * h), -gradClip, gradClip);
-        }
-
-        for (int i = 0; i < n; i++)
-          constants[i] = Math.Clamp(constants[i] + gradientSign * learningRate * gradient[i], -paramMax, paramMax);
-
-        var pNew   = p.CloneDeep();
-        UpdateConstants(pNew, constants, constIndices);
-
-        double newFit = EvaluateArr(pNew, localEvaluationBuffer, data, trainingDataRowCount, targetVariableIdx, modelingTask);
-        if (!double.IsNaN(newFit) && modelingTask.Score.IsBetter(newFit, pFit)) {
-          p    = pNew;
-          pFit = newFit;
-        } else {
-          break;
-        }
-      }
-
-      return Tuple.Create(p, pFit);
-    }
-
-    public Tuple<RPN<Symbol>, double> OptimizeCoefficientsAndConstants(RPN<Symbol> o, Stack<double> localEvaluationBuffer, double[] data, int trainingDataRowCount, int targetVariableIdx, Task modelingTask) {
-      var p = o.CloneDeep();
-      double pFit = EvaluateArr(p, localEvaluationBuffer, data, trainingDataRowCount, targetVariableIdx, modelingTask);
-
-      var constAndIdx  = ParseConstants(p);
-      var coefAndIdx   = ParseCoefficients(p);
-
-      double[] constants    = constAndIdx.Item1;
-      int[]    constIndices = constAndIdx.Item2;
-      double[] coefficients = coefAndIdx.Item2;
-      int[]    coefIndices  = coefAndIdx.Item3;
-
-      int n = constants.Length + coefficients.Length;
-      if (n == 0) return Tuple.Create(p, pFit);
-
-      const double h          = 1e-4;   // finite-difference step
-      const double learningRate = 0.01;
-      int maxIterations = OptimizationIterations;
-      const double gradClip   = 1e3;  // clip individual gradient components
-      const double paramMax   = 1e6;  // clamp parameters to [-paramMax, paramMax]
-      double gradientSign = modelingTask.Score.Direction == OptimizationDirection.Maximize ? 1.0 : -1.0;
-
-      for (int iter = 0; iter < maxIterations; iter++) {
-        var gradient = new double[n];
-
-        // central finite differences for each parameter
-        for (int i = 0; i < n; i++) {
-          var pPlus  = p.CloneDeep();
-          var pMinus = p.CloneDeep();
-
-          if (i < constants.Length) {
-            UpdateConstant(pPlus,  constants[i] + h, constIndices[i]);
-            UpdateConstant(pMinus, constants[i] - h, constIndices[i]);
-          } else {
-            int ci = i - constants.Length;
-            UpdateCoefficient(pPlus,  coefficients[ci] + h, coefIndices[ci]);
-            UpdateCoefficient(pMinus, coefficients[ci] - h, coefIndices[ci]);
-          }
-
-          double fPlus  = EvaluateArr(pPlus,  localEvaluationBuffer, data, trainingDataRowCount, targetVariableIdx, modelingTask);
-          double fMinus = EvaluateArr(pMinus, localEvaluationBuffer, data, trainingDataRowCount, targetVariableIdx, modelingTask);
-          if (double.IsNaN(fPlus) || double.IsNaN(fMinus)) continue;
-          gradient[i] = Math.Clamp((fPlus - fMinus) / (2.0 * h), -gradClip, gradClip);
-        }
-
-        // gradient step (direction determined by Score.Direction)
-        bool improved = false;
-        for (int i = 0; i < n; i++) {
-          if (i < constants.Length)
-            constants[i] = Math.Clamp(constants[i] + gradientSign * learningRate * gradient[i], -paramMax, paramMax);
-          else
-            coefficients[i - constants.Length] = Math.Clamp(coefficients[i - constants.Length] + gradientSign * learningRate * gradient[i], -paramMax, paramMax);
-        }
-
-        // apply updated parameters
-        var pNew = p.CloneDeep();
-        UpdateConstants(pNew, constants, constIndices);
-        UpdateCoefficients(pNew, coefficients, coefIndices);
-
-        double newFit = EvaluateArr(pNew, localEvaluationBuffer, data, trainingDataRowCount, targetVariableIdx, modelingTask);
-        if (!double.IsNaN(newFit) && modelingTask.Score.IsBetter(newFit, pFit)) {
-          p = pNew;
-          pFit = newFit;
-          improved = true;
-        }
-
-        if (!improved) break;
-      }
-
-      return Tuple.Create(p, pFit);
-    }
-    
-    private Tuple<double[], int[]> ParseConstants(RPN<Symbol> p) {
-      var constants = new List<double>();
-      var indices = new List<int>();
-
-      for(int i = 0; i < p.Count; i++) {
-        var s = p[i];
-        if(s.Type == SymbolType.Constant) {
-          constants.Add(s.Con.Value);
-          indices.Add(i);
-        }
-      }
-
-      return Tuple.Create(constants.ToArray(), indices.ToArray());      
-    }
-
-    private Tuple<string[], double[], int[]> ParseCoefficients(RPN<Symbol> p) {
-      var variables = new List<string>();
-      var coefficients = new List<double>();
-      var indices = new List<int>();
-
-      for(int i = 0; i < p.Count; i++) {
-        var s = p[i];
-        if(s.Type == SymbolType.Variable) {
-          variables.Add(s.Var.Name);
-          coefficients.Add(s.Var.Coefficient);
-          indices.Add(i);
-        }
-      }
-
-      return Tuple.Create(variables.ToArray(), coefficients.ToArray(), indices.ToArray()); 
-    }
-
-    private void UpdateConstants(RPN<Symbol> p, double[] constants, int[] indices) {
-      for(int i = 0; i < indices.Length; i++) {
-        p[indices[i]].Con.Value = constants[i];
-      }
-    }
-
-    private void UpdateConstant(RPN<Symbol> p, double constant, int index) {
-      p[index].Con.Value = constant;
-    }
-
-    private void UpdateCoefficient(RPN<Symbol> p, double coefficient, int index) {
-      p[index].Var.Coefficient = coefficient;
-    }
-
-    private void UpdateCoefficients(RPN<Symbol> p, double[] coefficients, int[] indices) {
-      for (int i = 0; i < indices.Length; i++) {
-        p[indices[i]].Var.Coefficient = coefficients[i];
-      }
-    }
-
-    #endregion Optimizers
 
     #region Helpers
 
