@@ -84,7 +84,8 @@ namespace PGP.Core {
     // GP Operators
     public Func<PgpAlgorithm, RPN<Symbol>> Breed { get; set; } = Creation.BreedConstrained;
     public Func<RPN<Symbol>[], Task, Tuple<RPN<Symbol>, int>> Select { get; set; } = Selection.TournamentSelection;
-    public Func<RPN<Symbol>, Task, RPN<Symbol>> Mutate { get; set; }
+    public Func<PgpAlgorithm, RPN<Symbol>, RPN<Symbol>> Mutate { get; set; } = Mutation.MutateMultiCase;
+    public List<Func<PgpAlgorithm, RPN<Symbol>, RPN<Symbol>>> Mutators { get; set; } = new List<Func<PgpAlgorithm, RPN<Symbol>, RPN<Symbol>>>();
     public Func<RPN<Symbol>, Task, double> Evaluate { get; set; }
     public Func<PgpAlgorithm, RPN<Symbol>, Task, DataRecord, Tuple<RPN<Symbol>, double>> Optimizer { get; set; } = Optimization.OptimizeCoefficientsAndConstants;
 
@@ -260,7 +261,14 @@ namespace PGP.Core {
 
             // mutate
             if (Rng.NextDouble() < MutationRate) {
-              populationNew[i] = MutateMultiCase(populationNew[i], Task);
+              // select mutator from list or use default
+              if (Mutators.Count > 0) {
+                var mutator = Mutators[Rng.Next(0, Mutators.Count)];
+                populationNew[i] = mutator(this, populationNew[i]);
+              } else {
+                populationNew[i] = Mutate(this, populationNew[i]);
+              }
+                          
               var diff = populationNew[i].Count - population[i].Count;
               sizeDiffAfterMutation.Add(diff);
             }
@@ -386,12 +394,15 @@ namespace PGP.Core {
             populationNew[i] = (RPN<Symbol>)c1.CloneDeep(); // safe fallback: use parent
           }
 
+          // mutate
           if (Rng.NextDouble() < MutationRate) {
-            var mutated = MutateMultiCase(populationNew[i], Task);
-            // only accept a size-shrinking result if it is not trivially degenerate
-            // (size 1 while both parents were larger means the mutation over-pruned)
-            if (mutated.Count > 1 || (c1.Count == 1 && c2.Count == 1))
-              populationNew[i] = mutated;
+            // select mutator from list or use default
+            if (Mutators.Count > 0) {
+              var mutator = Mutators[Rng.Next(0, Mutators.Count)];
+              populationNew[i] = mutator(this, populationNew[i]);
+            } else {
+              populationNew[i] = Mutate(this, populationNew[i]);
+            }
           }
 
           // Evaluate
@@ -830,88 +841,6 @@ namespace PGP.Core {
     }
 
     #endregion Crossovers
-
-    #region Mutators
-
-    public RPN<Symbol> MutateMultiCase(RPN<Symbol> o, Task mt) {
-      var p = o.CloneDeep();
-      int idx = Rng.Next(0, o.Count); // uniformly distributed
-
-      if (p[idx].Type == SymbolType.Constant) {
-        var val = p[idx].Con.Value;
-        var ratio = Rng.NextDouble() * 0.1;
-        if (Rng.NextDouble() < 0.5) p[idx].Con.Value = val + val * ratio;
-        else p[idx].Con.Value = val - val * ratio;
-      }
-      else if (p[idx].Type == SymbolType.Variable) {
-        // grow: wrap this terminal in a new binary operator + a new random terminal
-        // (bounded by SymbolCount so the tree can't exceed the size limit)
-        if (p.Count + 2 <= SymbolCount && Rng.NextDouble() < 0.25) {
-          var binaryOps = Operators.All.Where(op => op.Arity == 2).ToList();
-          if (binaryOps.Count > 0) {
-            var op = binaryOps[Rng.Next(binaryOps.Count)];
-            int ctr = 0;
-            var newTerminal = Creation.CreateTerminal(this, ref ctr);
-            // insert new terminal before idx, then append operator after idx
-            p.Insert(idx, newTerminal);         // new left operand before original terminal
-            p.Insert(idx + 2, new Symbol(op));  // operator after the pair
-          } else {
-            p[idx] = Creation.CreateVariable(this);
-          }
-        } else {
-          p[idx] = Creation.CreateVariable(this);
-        }
-      }
-      else // operator
-      {
-        var ratio = Rng.NextDouble();
-        if (ratio < 0.5) // prune: remove operator and one of its subtrees, keep the other
-        {
-          if (p[idx].Opr.Arity == 1) {
-            p.RemoveAt(idx); // drop unary operator; its single child argument remains
-          }
-          else if (p[idx].Opr.Arity == 2) {
-            int limit = FindSubtreeLimit(p, idx); // start of left child
-            // find boundary between left and right child subtrees
-            int rightStart = FindSubtreeLimit_Right(p, idx); // start of right child
-            if (Rng.NextDouble() < 0.5) {
-              // keep right child: remove [limit .. rightStart-1] (left child) and the operator
-              int leftLen = rightStart - limit;
-              p.RemoveAt(idx);           // remove operator first (end of span)
-              p.RemoveRange(limit, leftLen); // remove left subtree
-            } else {
-              // keep left child: remove [rightStart .. idx-1] (right child) and the operator
-              int rightLen = idx - rightStart;
-              p.RemoveAt(idx);           // remove operator
-              p.RemoveRange(rightStart, rightLen); // remove right subtree
-            }
-          }
-        }
-        else // replace operator with a different one of the same arity
-        {
-          p[idx].Opr = Operators.SelectRandomDifferent(Rng, p[idx].Opr);
-        }
-      }
-
-      return p;
-    }
-
-    // Returns the start index of the RIGHT child subtree of the binary operator at idx.
-    // The right child is the subtree immediately before the operator; the left child
-    // is everything from FindSubtreeLimit(p, idx) up to rightStart-1.
-    private int FindSubtreeLimit_Right(RPN<Symbol> p, int idx) {
-      // Walk backward from idx-1 to find the root of the right subtree.
-      // The right child's subtree ends at idx-1; its start is FindSubtreeLimit(p, idx-1)
-      // if that position is an operator, or idx-1 itself if it is a terminal.
-      int rightEnd = idx - 1;
-      if (p[rightEnd].Type == SymbolType.Operator) {
-        int s = FindSubtreeLimit(p, rightEnd);
-        return s >= 0 ? s : rightEnd;
-      }
-      return rightEnd; // terminal: single-node subtree
-    }
-
-    #endregion Mutators
     
     #region Simplifiers
 

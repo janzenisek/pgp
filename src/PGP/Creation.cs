@@ -87,7 +87,7 @@ namespace PGP.Core {
     // Recursively generates one valid subtree in post-order directly into p.
     // budget: symbols remaining across the entire program (shared, passed by ref).
     // depthRemaining: how many more levels this subtree may grow downward.
-    private static void BreedSubtree(PgpAlgorithm pgp, RPN<Symbol> p, ref int constantCounter, ref int budget, int depthRemaining) {
+    public static void BreedSubtree(PgpAlgorithm pgp, RPN<Symbol> p, ref int constantCounter, ref int budget, int depthRemaining) {
       // Force a terminal when the budget is exhausted or the depth cap is reached.
       bool forceTerminal = budget <= 1 || depthRemaining <= 1;
 

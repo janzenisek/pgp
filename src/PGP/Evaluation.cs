@@ -7,12 +7,5 @@ using System.Threading.Tasks;
 namespace PGP.Core {
   public static class Evaluation {
 
-    public static double FleeBasedEvaluation(RPN<Symbol> program, Task task) {
-
-
-
-      return program.Score;
-    }
-
   }
 }

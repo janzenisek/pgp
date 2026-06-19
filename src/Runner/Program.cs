@@ -9,16 +9,16 @@ namespace PGP.Runner {
       var fr = new FastRandom();
 
       // setup sample data set
-      //var targetVariable = Resinet_TargetVariable_PvProduction;
-      //var inputVariables = InputVariables["Resinet_BasicVariableSet_PvProduction"];
-      var targetVariable = GeoTorus_TargetVariable_Volume;
-      var inputVariables = InputVariables["GeoTorus_Volume"];
+      var targetVariable = Resinet_TargetVariable_PvProduction;
+      var inputVariables = InputVariables["Resinet_BasicVariableSet_PvProduction"];
+      //var targetVariable = GeoTorus_TargetVariable_Volume;
+      //var inputVariables = InputVariables["GeoTorus_Volume"];
       var allVariables = inputVariables.Append(targetVariable).ToList();
       var variableIndices = allVariables
         .Select((x, i) => new { Item = x, Index = i })
         .ToDictionary(x => x.Item, x => x.Index);
-      //Set ds = ProtoDataReader.ReadDataset_Numeric(Datasets["Resinet"], allVariables);
-      DataSet ds = ProtoDataReader.ReadDataset_Numeric(Datasets["GeoTorus"], allVariables);
+      DataSet ds = ProtoDataReader.ReadDataset_Numeric(Datasets["Resinet"], allVariables);
+      //DataSet ds = ProtoDataReader.ReadDataset_Numeric(Datasets["GeoTorus"], allVariables);
       var dds = ds.GetDoubleSet();
       var variableLimitDict = new Dictionary<string, Tuple<double, double>>();
 
@@ -32,7 +32,7 @@ namespace PGP.Runner {
       DataSet trainingSetOriginalOrder = ds.Subset(0, 100);           
       DataSet trainingSet = trainingSetOriginalOrder.Shuffle(fr);
       Core.Task modelingTask = new Core.Task(
-        name: "GeoTorus_Volume",
+        name: "Resinet",
         targetVariable: targetVariable,
         inputVariables: inputVariables,
         metric: Metric.NMSE,
@@ -55,6 +55,7 @@ namespace PGP.Runner {
       pgp.Breed = Creation.BreedConstrained;
       pgp.Select = Selection.TournamentSelection;
       pgp.Optimizer = Optimization.OptimizeCoefficientsAndConstants;
+      pgp.Mutators = [Mutation.MutateReplaceSubtree, Mutation.MutateTerminateSubtree];
 
 
       // configure algorithm options
