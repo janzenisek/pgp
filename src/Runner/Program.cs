@@ -8,7 +8,7 @@ namespace PGP.Runner {
     public static void Main(string[] args) {
       var fr = new FastRandom();
 
-      // setup sample data set
+      // --- setup sample data set
       var targetVariable = Resinet_TargetVariable_PvProduction;
       var inputVariables = InputVariables["Resinet_BasicVariableSet_PvProduction"];
       //var targetVariable = GeoTorus_TargetVariable_Volume;
@@ -28,7 +28,8 @@ namespace PGP.Runner {
         variableLimitDict.Add(s.Value.Name, Tuple.Create(min, max));
       }
 
-      // configure data set and modeling task
+
+      // --- configure data set and modeling task
       DataSet trainingSetOriginalOrder = ds.Subset(0, 100);           
       DataSet trainingSet = trainingSetOriginalOrder.Shuffle(fr);
       Core.Task modelingTask = new Core.Task(
@@ -40,7 +41,8 @@ namespace PGP.Runner {
       );
       modelingTask.VariableLimitsDict = trainingSetOriginalOrder.GetDoubleSetLimits();
 
-      // configure gp hyperparameters
+
+      // --- configure gp hyperparameters
       var pgp = new PgpAlgorithm(randomNumberGenerator:fr,
         generations:100,
         populationSize:100,
@@ -51,19 +53,23 @@ namespace PGP.Runner {
         maximumSelectionPressure:1000,
         elites:1);
 
-      // configure gp operators
+
+      // --- configure gp operators
       pgp.Breed = Creation.BreedConstrained;
       pgp.Select = Selection.TournamentSelection;
       pgp.Optimizer = Optimization.OptimizeCoefficientsAndConstants;
+      pgp.Crossover = Crossing.Cross;
       pgp.Mutators = [Mutation.MutateReplaceSubtree, Mutation.MutateTerminateSubtree];
 
 
-      // configure algorithm options
+      // --- configure algorithm options
       pgp.LogStatistics = true;
       pgp.UseParallelization = true;
       pgp.PerformSimplification = true;
       pgp.OptimizationIterations = 10;
 
+
+      // --- run gp algorithm
       Console.WriteLine("Starting GPSR...");
       Console.WriteLine("(press any key to stop computation)\n");
       
@@ -71,24 +77,24 @@ namespace PGP.Runner {
       bool k = false;
       var cts = new CancellationTokenSource();
       sw.Start();
-      System.Threading.Tasks.Task t = pgp.Fit(modelingTask, trainingSet, cts.Token);     
+      System.Threading.Tasks.Task t = pgp.Fit(modelingTask, trainingSet, cts.Token); // gp algorithm execution
       
       while (!k && !t.IsCompleted) {
         k = Console.KeyAvailable;
         t.Wait(100);
       }
-
       cts.Cancel();
       t.Wait(1000);      
-
       sw.Stop();
 
+
+      // --- print results/stats
       Console.WriteLine();
       Console.WriteLine($"Evaluations:        {pgp.EvaluationCount}");
       Console.WriteLine($"Runtime:            {(sw.ElapsedMilliseconds / 1000.0):f8} seconds");
       Console.WriteLine($"Time / Evaluation:  {(sw.ElapsedMilliseconds / 1000.0 / pgp.EvaluationCount):f8} seconds");
       Console.WriteLine();
-      //Console.WriteLine($"Best Program RPN:   {pgp.BestProgramRPN}");
+      Console.WriteLine($"Best Program RPN:   {pgp.BestProgramRPN}");
       Console.WriteLine($"Best Program INF:   {pgp.BestProgram}");
       Console.WriteLine($"Best NMSE:          {pgp.BestProgramNMSE}");
       Console.WriteLine($"Best Pearson R:     {pgp.BestProgramPearsonR}");

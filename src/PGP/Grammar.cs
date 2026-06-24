@@ -87,7 +87,7 @@ namespace PGP.Core {
       ,ProtectedLogarithm
       //,Exponential // depr: insecure
       ,ProtectedExponential
-      ,Pi
+      //,Pi // currently not in use
     };
 
     public static Operator SelectRandom(FastRandom rng) {
