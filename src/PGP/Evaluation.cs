@@ -1,13 +1,21 @@
 ﻿using PGP.Data;
 using System;
+using System.Buffers;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
 
 namespace PGP.Core {
-  public static class Evaluation {    
+  public static class Evaluation {
+    // Cross-instance structural delegate cache (Cause 3 fix).
+    // Key = GetStructuralKey(p, rowCount); value is reused by any program with the same topology.
+    private static readonly ConcurrentDictionary<string, Action<double[], double[], double[]>>
+      _delegateCache = new ConcurrentDictionary<string, Action<double[], double[], double[]>>();
+
     // MethodInfo cache used by CompileToDelegate to build Math.* call nodes
     private static readonly System.Reflection.MethodInfo _miSin = typeof(Math).GetMethod(nameof(Math.Sin), new[] { typeof(double) })!;
     private static readonly System.Reflection.MethodInfo _miCos = typeof(Math).GetMethod(nameof(Math.Cos), new[] { typeof(double) })!;
@@ -66,21 +74,43 @@ namespace PGP.Core {
     }
 
     public static double EvaluateProgram(PgpAlgorithm pgp, RPN<Symbol> p, Task t, DataRecord data) {
-      // Compile once and cache on the program instance; reuse on every subsequent call
-      // for the same individual (e.g. during constant optimisation inner loops).
-      // CloneDeep (called after crossover/mutation) nulls the cache automatically.
-      p.CompiledDelegate ??= CompileToDelegate(p, data.RowCount);
-      if (p.CompiledDelegate == null) return t.Score.GetPessimal();
+      // --- Cause 3 fix: look up / build a structurally-keyed delegate shared across instances ---
+      // --- Cause 2 fix: constants & coefficients are NOT baked in; they are passed at runtime  ---
+      //     via the paramValues array, so the same delegate is valid for any numeric values.
+      // --- Cause 1 fix: the row-loop runs *inside* the compiled delegate; only one call needed. ---
+
+      string key = GetStructuralKey(p, data.RowCount);
+
+      if (p.CompiledDelegate == null || !_delegateCache.ContainsKey(key)) {
+        var compiled = CompileToDelegate(p, data.RowCount);
+        if (compiled == null) return t.Score.GetPessimal();
+        _delegateCache[key] = compiled;
+        p.CompiledDelegate = compiled;
+      } else {
+        // Reuse cached cross-instance delegate on this program instance
+        p.CompiledDelegate = _delegateCache[key];
+      }
 
       int targetIdx = t.VariableIndices[t.TargetVariable];
+      int rowCount = data.RowCount;
 
-      for (int i = 0; i < data.RowCount; i++) {
-        double estimated = p.CompiledDelegate(data.Data, i);
-        if (!double.IsFinite(estimated))
-          return t.Score.GetPessimal();
+      // Extract current numeric parameters (constants then coefficients) into a small array.
+      double[] paramValues = ExtractParameterValues(p);
 
-        p.TrueResults[i] = data.Data[targetIdx * data.RowCount + i];
-        p.EstimatedResults[i] = estimated;
+      // Rent a temporary output buffer — zero heap allocation on the hot path.
+      double[] estBuffer = ArrayPool<double>.Shared.Rent(rowCount);
+      try {
+        p.CompiledDelegate(data.Data, paramValues, estBuffer);
+
+        // Check for non-finite results and copy into program lists via span (no _version bump).
+        Span<double> estSpan = CollectionsMarshal.AsSpan(p.EstimatedResults);
+        for (int i = 0; i < rowCount; i++) {
+          if (!double.IsFinite(estBuffer[i])) return t.Score.GetPessimal();
+          estSpan[i] = estBuffer[i];
+          p.TrueResults[i] = data.Data[targetIdx * rowCount + i];
+        }
+      } finally {
+        ArrayPool<double>.Shared.Return(estBuffer);
       }
 
       p.PearsonR = PearsonR.ComputeScore(p);
@@ -92,51 +122,137 @@ namespace PGP.Core {
 
 
 
-    // Translates an RPN<Symbol> expression into a compiled Func<double[], int, double>.
-    // Parameters of the delegate: data array (column-major, stride = rowCount), row index.
+    // Translates an RPN<Symbol> expression into a compiled Action<double[], double[], double[]>.
+    // Parameters of the delegate:
+    //   data        — column-major flat array (stride = rowCount)
+    //   paramValues — [constants... , coefficients...] in RPN traversal order
+    //   estimates   — pre-allocated output array; estimates[i] is written for each row i
+    // The row loop runs inside the compiled body (Cause 1 fix).
+    // Numeric values are read from paramValues at runtime (Cause 2 / 3 fix: cache by structure).
     // Returns null if the program is structurally invalid.
-    private static Func<double[], int, double>? CompileToDelegate(RPN<Symbol> p, int rowCount) {
+    private static Action<double[], double[], double[]>? CompileToDelegate(RPN<Symbol> p, int rowCount) {
       try {
-        // Parameters: data array and row index
         var dataParam = Expression.Parameter(typeof(double[]), "data");
-        var rowParam = Expression.Parameter(typeof(int), "rowIdx");
+        var paramValuesParam = Expression.Parameter(typeof(double[]), "paramValues");
+        var estimatesParam = Expression.Parameter(typeof(double[]), "estimates");
 
+        // Loop variable
+        var rowVar = Expression.Variable(typeof(int), "row");
+
+        // Walk the RPN once to collect param slot assignments and build per-row expression.
+        // paramSlot: constants get slots 0..nConst-1, coefficients get slots nConst..nConst+nCoef-1
+        int paramSlot = 0;
+        int coefSlotBase = p.Count(s => ((Symbol)(object)s!).Type == SymbolType.Constant);
+
+        int constSlot = 0;
+        int coefSlot = 0;
+        var slotByRpnIndex = new int[p.Count]; // index into paramValues for each terminal
+        for (int i = 0; i < p.Count; i++) {
+          var sym = (Symbol)(object)p[i]!;
+          if (sym.Type == SymbolType.Constant) {
+            slotByRpnIndex[i] = constSlot++;
+          } else if (sym.Type == SymbolType.Variable) {
+            slotByRpnIndex[i] = coefSlotBase + coefSlot++;
+          }
+        }
+
+        // Build the scalar expression for one row, reading params from paramValues
         var stack = new Stack<Expression>();
+        constSlot = 0;
+        coefSlot = 0;
 
-        foreach (var symbol in p) {
-          if (symbol.Type == SymbolType.Constant) {
-            // Bake constant value directly as a literal
-            stack.Push(Expression.Constant(symbol.Con.Value, typeof(double)));
-          } else if (symbol.Type == SymbolType.Variable) {
-            // data[varIndex * rowCount + rowIdx]  —  matches EvaluateStack layout
-            int stride = symbol.Var.Index * rowCount;
-            Expression index = stride == 0
-              ? (Expression)rowParam
-              : Expression.Add(Expression.Constant(stride), rowParam);
-            Expression load = Expression.ArrayIndex(dataParam, index);
+        for (int i = 0; i < p.Count; i++) {
+          var sym = (Symbol)(object)p[i]!;
+          if (sym.Type == SymbolType.Constant) {
+            // Read constant from paramValues[slot] at runtime
+            int slot = slotByRpnIndex[i];
+            stack.Push(Expression.ArrayIndex(paramValuesParam, Expression.Constant(slot)));
+          } else if (sym.Type == SymbolType.Variable) {
+            // data[varIndex * rowCount + row]
+            int stride = sym.Var.Index * rowCount;
+            Expression idx = stride == 0
+              ? (Expression)rowVar
+              : Expression.Add(Expression.Constant(stride), rowVar);
+            Expression load = Expression.ArrayIndex(dataParam, idx);
 
-            // Apply coefficient if not 1.0
-            Expression varExpr = symbol.Var.Coefficient != 1.0
-              ? Expression.Multiply(load, Expression.Constant(symbol.Var.Coefficient))
-              : load;
-
-            stack.Push(varExpr);
-          } else // Operator
-            {
-            Expression? node = BuildOperatorExpression(symbol.Opr, stack);
+            // Multiply by coefficient read from paramValues[slot] at runtime
+            int slot = slotByRpnIndex[i];
+            Expression coef = Expression.ArrayIndex(paramValuesParam, Expression.Constant(slot));
+            stack.Push(Expression.Multiply(load, coef));
+          } else {
+            Expression? node = BuildOperatorExpression(sym.Opr, stack);
             if (node == null) return null;
             stack.Push(node);
           }
         }
 
         if (stack.Count != 1) return null;
+        Expression scalarBody = stack.Pop();
 
-        var body = stack.Pop();
-        var lambda = Expression.Lambda<Func<double[], int, double>>(body, dataParam, rowParam);
+        // for (int row = 0; row < rowCount; row++) { estimates[row] = ...; }
+        var breakLabel = Expression.Label("loopEnd");
+
+        var loop = Expression.Block(
+          new[] { rowVar },
+          Expression.Assign(rowVar, Expression.Constant(0)),
+          Expression.Loop(
+            Expression.Block(
+              Expression.IfThen(
+                Expression.GreaterThanOrEqual(rowVar, Expression.Constant(rowCount)),
+                Expression.Break(breakLabel)),
+              Expression.Assign(
+                Expression.ArrayAccess(estimatesParam, rowVar),
+                scalarBody),
+              Expression.PostIncrementAssign(rowVar)),
+            breakLabel));
+
+        var lambda = Expression.Lambda<Action<double[], double[], double[]>>(
+          loop, dataParam, paramValuesParam, estimatesParam);
         return lambda.Compile();
       } catch {
         return null;
       }
+    }
+
+    // Builds a structural key for the delegate cache.
+    // Encodes operator symbols, variable indices, and constant *positions* — but never numeric
+    // values — so any program with the same tree topology maps to the same compiled delegate.
+    // Format: "{rowCount}|{token},{token},...", where token is:
+    //   "v{varIndex}" for a variable, "c" for a constant, the operator symbol for operators.
+    private static string GetStructuralKey(RPN<Symbol> p, int rowCount) {
+      var sb = new StringBuilder();
+      sb.Append(rowCount);
+      sb.Append('|');
+      for (int i = 0; i < p.Count; i++) {
+        if (i > 0) sb.Append(',');
+        var sym = p[i];
+        if (sym.Type == SymbolType.Variable)
+          sb.Append('v').Append(sym.Var.Index);
+        else if (sym.Type == SymbolType.Constant)
+          sb.Append('c');
+        else
+          sb.Append(sym.Opr.Symbol);
+      }
+      return sb.ToString();
+    }
+
+    // Extracts current runtime parameter values from a program in the same order that
+    // CompileToDelegate assigns paramValues slots: constants first (RPN order), then
+    // variable coefficients (RPN order).
+    internal static double[] ExtractParameterValues(RPN<Symbol> p) {
+      int nConst = 0, nCoef = 0;
+      for (int i = 0; i < p.Count; i++) {
+        if (p[i].Type == SymbolType.Constant) nConst++;
+        else if (p[i].Type == SymbolType.Variable) nCoef++;
+      }
+      var values = new double[nConst + nCoef];
+      int ci = 0, ki = nConst;
+      for (int i = 0; i < p.Count; i++) {
+        var sym = p[i];
+        if (sym.Type == SymbolType.Constant) values[ci++] = sym.Con.Value;
+        else if (sym.Type == SymbolType.Variable) values[ki++] = sym.Var.Coefficient;
+      }
+      return values;
     }
 
     // Pops operands from the expression stack and returns the combined Expression node.

@@ -66,7 +66,7 @@ namespace PGP.Runner {
       // --- configure algorithm options
       pgp.LogStatistics = true;
       pgp.UseParallelization = true;
-      pgp.PerformSimplification = false;
+      pgp.PerformSimplification = true;
       pgp.OptimizationIterations = 10;
 
 

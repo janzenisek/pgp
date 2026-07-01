@@ -17,9 +17,13 @@ namespace PGP.Core {
     public List<double> TrueResults { get; set; }
 
     // Cached compiled delegate produced by EvaluateProgram.
+    // Signature: Action<double[], double[], double[]> = (data, paramValues, estimates)
+    //   data        — column-major flat array, stride = rowCount
+    //   paramValues — [constants... , coefficients...] extracted by ExtractParameterValues
+    //   estimates   — pre-allocated output array, length = rowCount
     // Nulled by CloneDeep (structure changes after crossover/mutation).
     // Preserved by CloneDeepWithResults and the shallow Clone overloads (structure unchanged).
-    public Func<double[], int, double>? CompiledDelegate { get; set; }
+    public Action<double[], double[], double[]>? CompiledDelegate { get; set; }
 
 
     //public RPN() : base() {

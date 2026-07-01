@@ -10,7 +10,10 @@ namespace PGP.Core {
     public static Tuple<RPN<Symbol>, double> OptimizeConstantsViaEvolutionStrategy(PgpAlgorithm pgp, RPN<Symbol> program, Task task, DataRecord data) {
       var p = program.CloneDeep();
       double pFit = pgp.Evaluate(pgp, p, task, data);
-      var pNew = p.CloneDeep();
+
+      // Keep a separate "best" value array; pNew tracks the running best program.
+      var pNew = p.CloneDeepWithResults();
+      pNew.CompiledDelegate = p.CompiledDelegate; // carry compiled delegate to pNew
       var pNewFit = pFit;
 
       var constantsAndIndices = ParseConstants(p);
@@ -18,11 +21,9 @@ namespace PGP.Core {
       var indices = constantsAndIndices.Item2;
       var constantsNew = (double[])constants.Clone();
 
-      // Step sizes are initialised relative to each constant's magnitude so that
-      // a constant of 1000 gets a meaningful perturbation, not just ±0.1.
       double[] stepSizes = constants.Select(c => Math.Max(Math.Abs(c) * 0.1, 0.1)).ToArray();
-      const double stepMax = 1e4;   // hard cap — prevents runaway growth
-      const double paramMax = 1e6;   // clamp constants to [-paramMax, paramMax]
+      const double stepMax = 1e4;
+      const double paramMax = 1e6;
       int[] executionOrder = Enumerable.Range(0, constants.Length).ToArray();
 
       for (int g = 0; g < pgp.OptimizationIterations; g++) {
@@ -30,28 +31,29 @@ namespace PGP.Core {
         for (int i = 0; i < indices.Length; i++) {
           var idx = executionOrder[i];
 
-          // Additive perturbation: c' = c ± step  (1/5-success rule adaptation)
           double step = stepSizes[idx];
           double delta = pgp.Rng.NextDouble() < 0.5 ? step : -step;
-          double constantMutated = Math.Clamp(constantsNew[idx] + delta, -paramMax, paramMax);
+          double originalValue = constantsNew[idx];
+          double constantMutated = Math.Clamp(originalValue + delta, -paramMax, paramMax);
 
-          var pMutated = pNew.CloneDeep();
-          UpdateConstant(pMutated, constantMutated, indices[idx]);
-          var pMutatedFit = pgp.Evaluate(pgp,pMutated, task, data);
+          // --- Cause 2 fix: mutate in-place, evaluate, then restore ---
+          UpdateConstant(pNew, constantMutated, indices[idx]);
+          var pMutatedFit = pgp.Evaluate(pgp, pNew, task, data);
 
           if (!double.IsNaN(pMutatedFit) && task.Score.IsBetter(pMutatedFit, pNewFit)) {
             constantsNew[idx] = constantMutated;
-            UpdateConstant(pNew, constantMutated, indices[idx]);
-            stepSizes[idx] = Math.Min(stepSizes[idx] * 1.5, stepMax); // grow step on success
+            stepSizes[idx] = Math.Min(stepSizes[idx] * 1.5, stepMax);
             pNewFit = pMutatedFit;
           } else {
-            stepSizes[idx] *= Math.Pow(1.5, -0.25); // shrink step on failure
+            // Restore to the previous best value
+            UpdateConstant(pNew, originalValue, indices[idx]);
+            stepSizes[idx] *= Math.Pow(1.5, -0.25);
           }
         }
       }
 
-      // sanity check and final swap
-      pNewFit = pgp.Evaluate(pgp,pNew, task, data);
+      // Final sanity check and swap
+      pNewFit = pgp.Evaluate(pgp, pNew, task, data);
       if (task.Score.IsBetter(pNewFit, pFit)) {
         p = pNew;
         pFit = pNewFit;
@@ -73,37 +75,44 @@ namespace PGP.Core {
       const double h = 1e-4;
       const double learningRate = 0.01;
       int maxIterations = pgp.OptimizationIterations;
-      const double gradClip = 1e3;  // clip individual gradient components
-      const double paramMax = 1e6;  // clamp constants to [-paramMax, paramMax]
+      const double gradClip = 1e3;
+      const double paramMax = 1e6;
       double gradientSign = task.Score.Direction == OptimizationDirection.Maximize ? 1.0 : -1.0;
 
       for (int iter = 0; iter < maxIterations; iter++) {
         var gradient = new double[n];
 
+        // --- Cause 2 fix: in-place +h / -h probes; no CloneDeep inside the loop ---
         for (int i = 0; i < n; i++) {
-          var pPlus = p.CloneDeep();
-          var pMinus = p.CloneDeep();
+          double orig = constants[i];
 
-          UpdateConstant(pPlus, constants[i] + h, constIndices[i]);
-          UpdateConstant(pMinus, constants[i] - h, constIndices[i]);
+          UpdateConstant(p, orig + h, constIndices[i]);
+          double fPlus = pgp.Evaluate(pgp, p, task, data);
 
-          double fPlus = pgp.Evaluate(pgp, pPlus, task, data);
-          double fMinus = pgp.Evaluate(pgp, pMinus, task, data);
+          UpdateConstant(p, orig - h, constIndices[i]);
+          double fMinus = pgp.Evaluate(pgp, p, task, data);
+
+          // Restore original value
+          UpdateConstant(p, orig, constIndices[i]);
+
           if (double.IsNaN(fPlus) || double.IsNaN(fMinus)) continue;
           gradient[i] = Math.Clamp((fPlus - fMinus) / (2.0 * h), -gradClip, gradClip);
         }
 
+        // Apply gradient step in-place and check improvement
+        double[] prevConstants = (double[])constants.Clone();
         for (int i = 0; i < n; i++)
           constants[i] = Math.Clamp(constants[i] + gradientSign * learningRate * gradient[i], -paramMax, paramMax);
 
-        var pNew = p.CloneDeep();
-        UpdateConstants(pNew, constants, constIndices);
+        UpdateConstants(p, constants, constIndices);
+        double newFit = pgp.Evaluate(pgp, p, task, data);
 
-        double newFit = pgp.Evaluate(pgp, pNew, task, data);
         if (!double.IsNaN(newFit) && task.Score.IsBetter(newFit, pFit)) {
-          p = pNew;
           pFit = newFit;
         } else {
+          // Revert constants to the previous best
+          constants = prevConstants;
+          UpdateConstants(p, constants, constIndices);
           break;
         }
       }
@@ -126,38 +135,44 @@ namespace PGP.Core {
       int n = constants.Length + coefficients.Length;
       if (n == 0) return Tuple.Create(p, pFit);
 
-      const double h = 1e-4;   // finite-difference step
+      const double h = 1e-4;
       const double learningRate = 0.01;
       int maxIterations = pgp.OptimizationIterations;
-      const double gradClip = 1e3;  // clip individual gradient components
-      const double paramMax = 1e6;  // clamp parameters to [-paramMax, paramMax]
+      const double gradClip = 1e3;
+      const double paramMax = 1e6;
       double gradientSign = task.Score.Direction == OptimizationDirection.Maximize ? 1.0 : -1.0;
 
       for (int iter = 0; iter < maxIterations; iter++) {
         var gradient = new double[n];
 
-        // central finite differences for each parameter
+        // --- Cause 2 fix: in-place +h / -h probes for both constants and coefficients ---
         for (int i = 0; i < n; i++) {
-          var pPlus = p.CloneDeep();
-          var pMinus = p.CloneDeep();
-
           if (i < constants.Length) {
-            UpdateConstant(pPlus, constants[i] + h, constIndices[i]);
-            UpdateConstant(pMinus, constants[i] - h, constIndices[i]);
+            double orig = constants[i];
+            UpdateConstant(p, orig + h, constIndices[i]);
+            double fPlus = pgp.Evaluate(pgp, p, task, data);
+            UpdateConstant(p, orig - h, constIndices[i]);
+            double fMinus = pgp.Evaluate(pgp, p, task, data);
+            UpdateConstant(p, orig, constIndices[i]); // restore
+            if (double.IsNaN(fPlus) || double.IsNaN(fMinus)) continue;
+            gradient[i] = Math.Clamp((fPlus - fMinus) / (2.0 * h), -gradClip, gradClip);
           } else {
             int ci = i - constants.Length;
-            UpdateCoefficient(pPlus, coefficients[ci] + h, coefIndices[ci]);
-            UpdateCoefficient(pMinus, coefficients[ci] - h, coefIndices[ci]);
+            double orig = coefficients[ci];
+            UpdateCoefficient(p, orig + h, coefIndices[ci]);
+            double fPlus = pgp.Evaluate(pgp, p, task, data);
+            UpdateCoefficient(p, orig - h, coefIndices[ci]);
+            double fMinus = pgp.Evaluate(pgp, p, task, data);
+            UpdateCoefficient(p, orig, coefIndices[ci]); // restore
+            if (double.IsNaN(fPlus) || double.IsNaN(fMinus)) continue;
+            gradient[i] = Math.Clamp((fPlus - fMinus) / (2.0 * h), -gradClip, gradClip);
           }
-
-          double fPlus = pgp.Evaluate(pgp, pPlus, task, data);
-          double fMinus = pgp.Evaluate(pgp, pMinus, task, data);
-          if (double.IsNaN(fPlus) || double.IsNaN(fMinus)) continue;
-          gradient[i] = Math.Clamp((fPlus - fMinus) / (2.0 * h), -gradClip, gradClip);
         }
 
-        // gradient step (direction determined by Score.Direction)
-        bool improved = false;
+        // Snapshot before applying step so we can revert on no-improvement
+        double[] prevConstants = (double[])constants.Clone();
+        double[] prevCoefficients = (double[])coefficients.Clone();
+
         for (int i = 0; i < n; i++) {
           if (i < constants.Length)
             constants[i] = Math.Clamp(constants[i] + gradientSign * learningRate * gradient[i], -paramMax, paramMax);
@@ -165,19 +180,21 @@ namespace PGP.Core {
             coefficients[i - constants.Length] = Math.Clamp(coefficients[i - constants.Length] + gradientSign * learningRate * gradient[i], -paramMax, paramMax);
         }
 
-        // apply updated parameters
-        var pNew = p.CloneDeep();
-        UpdateConstants(pNew, constants, constIndices);
-        UpdateCoefficients(pNew, coefficients, coefIndices);
+        // Apply updated parameters in-place and evaluate
+        UpdateConstants(p, constants, constIndices);
+        UpdateCoefficients(p, coefficients, coefIndices);
+        double newFit = pgp.Evaluate(pgp, p, task, data);
 
-        double newFit = pgp.Evaluate(pgp, pNew, task, data);
         if (!double.IsNaN(newFit) && task.Score.IsBetter(newFit, pFit)) {
-          p = pNew;
           pFit = newFit;
-          improved = true;
+        } else {
+          // Revert to previous best values in-place
+          constants = prevConstants;
+          coefficients = prevCoefficients;
+          UpdateConstants(p, constants, constIndices);
+          UpdateCoefficients(p, coefficients, coefIndices);
+          break;
         }
-
-        if (!improved) break;
       }
 
       return Tuple.Create(p, pFit);
