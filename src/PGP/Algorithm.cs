@@ -44,23 +44,13 @@ namespace PGP.Core {
     private Stack<double> evaluationBuffer;
     private RPN<Symbol>[] population;
 
-    // MethodInfo cache used by CompileToDelegate to build Math.* call nodes
-    private static readonly System.Reflection.MethodInfo _miSin   = typeof(Math).GetMethod(nameof(Math.Sin),   new[] { typeof(double) })!;
-    private static readonly System.Reflection.MethodInfo _miCos   = typeof(Math).GetMethod(nameof(Math.Cos),   new[] { typeof(double) })!;
-    private static readonly System.Reflection.MethodInfo _miTan   = typeof(Math).GetMethod(nameof(Math.Tan),   new[] { typeof(double) })!;
-    private static readonly System.Reflection.MethodInfo _miTanh  = typeof(Math).GetMethod(nameof(Math.Tanh),  new[] { typeof(double) })!;
-    private static readonly System.Reflection.MethodInfo _miLog   = typeof(Math).GetMethod(nameof(Math.Log),   new[] { typeof(double) })!;
-    private static readonly System.Reflection.MethodInfo _miExp   = typeof(Math).GetMethod(nameof(Math.Exp),   new[] { typeof(double) })!;
-    private static readonly System.Reflection.MethodInfo _miSqrt  = typeof(Math).GetMethod(nameof(Math.Sqrt),  new[] { typeof(double) })!;
-    private static readonly System.Reflection.MethodInfo _miMin   = typeof(Math).GetMethod(nameof(Math.Min),   new[] { typeof(double), typeof(double) })!;
-    private static readonly System.Reflection.MethodInfo _miMax   = typeof(Math).GetMethod(nameof(Math.Max),   new[] { typeof(double), typeof(double) })!;
-    private static readonly System.Reflection.MethodInfo _miIsNaN = typeof(double).GetMethod(nameof(double.IsNaN), new[] { typeof(double) })!;
-
     private object locker;
     private object bestSolutionLocker;
 
     private int targetVariableIdx;
     private Dictionary<string, Tuple<double, double>> variableLimitsDict;
+
+
 
     // General
     public Task Task { get; set; }
@@ -87,7 +77,7 @@ namespace PGP.Core {
     public Func<PgpAlgorithm, RPN<Symbol>, RPN<Symbol>, RPN<Symbol>> Crossover { get; set; } = Crossing.Cross;
     public Func<PgpAlgorithm, RPN<Symbol>, RPN<Symbol>> Mutate { get; set; } = Mutation.MutateMultiCase;
     public List<Func<PgpAlgorithm, RPN<Symbol>, RPN<Symbol>>> Mutators { get; set; } = new List<Func<PgpAlgorithm, RPN<Symbol>, RPN<Symbol>>>();
-    public Func<RPN<Symbol>, Task, double> Evaluate { get; set; }
+    public Func<PgpAlgorithm, RPN<Symbol>, Task, DataRecord, double> Evaluate { get; set; } = Evaluation.EvaluateStack;
     public Func<PgpAlgorithm, RPN<Symbol>, Task, DataRecord, Tuple<RPN<Symbol>, double>> Optimizer { get; set; } = Optimization.OptimizeCoefficientsAndConstants;
 
 
@@ -191,7 +181,7 @@ namespace PGP.Core {
 
       for (int i = 0; i < population.Length;) {
         population[i] = Breed(this);
-        double f = EvaluateArr(population[i], modelingTask, DataRecord);
+        double f = Evaluate(this, population[i], modelingTask, DataRecord);
 
         if (!double.IsNaN(f)) {
           if (modelingTask.Score.IsBetter(f, bestFitScore)) {
@@ -278,9 +268,7 @@ namespace PGP.Core {
               populationNew[i] = Simplify(populationNew[i]);
 
             // evaluate
-            //double f = EvaluateSet(populationNew[i], doubleSet, trainingData.RowCount, TargetVariable);            
-            //double f = EvaluateArr(populationNew[i], localEvaluationBuffer, data, trainingData.RowCount, targetVariableIdx, modelingTask);
-            double f = EvaluateProgram(populationNew[i], Task, DataRecord);
+            double f = Evaluate(this, populationNew[i], Task, DataRecord);
             localEvaluationCount++;
 
             if(Optimizer != null) {
@@ -288,14 +276,6 @@ namespace PGP.Core {
               populationNew[i] = optimizedResult.Item1;
               f = optimizedResult.Item2;
             }
-
-            // penalize
-            //f = PenalizePearsonR(populationNew[i]);
-            //f = PenalizeNMSE(populationNew[i]);
-
-            // minimum description length
-            //f = EvaluateDescriptionLength(populationNew[i]);
-
 
             if (!double.IsNaN(f)) {
               //if (f > Math.Min(f1, f2)) { // OS              
@@ -330,8 +310,7 @@ namespace PGP.Core {
         populationNew = tmpPopulation;
         fitScoresNew = tmpFitScores;
 
-        // keep elite
-        EvaluateDescriptionLength(bestSolution);
+        // keep elite        
         populationNew[0] = (RPN<Symbol>)bestSolution.CloneDeepWithResults();
         fitScoresNew[0] = bestFitScore;
 
@@ -406,7 +385,7 @@ namespace PGP.Core {
           }
 
           // Evaluate
-          double f = EvaluateArr(populationNew[i], Task, DataRecord);
+          double f = Evaluate(this, populationNew[i], Task, DataRecord);
           generationalEvaluationCount++;
 
           // perform constant optimization
@@ -771,385 +750,6 @@ namespace PGP.Core {
     }
 
     #endregion Simplifiers
-
-    #region Evaluators
-
-    //public double EvaluateSet(RPN<Symbol> p, Dictionary<string, Series<double>> variableDict, int rowCount, string targetVariable) {
-    //  for (int i = 0; i < rowCount; i++) {
-    //    var variableDictRow = variableDict.ToDictionary(x => x.Key, y => y.Value.Values[i]);
-    //    Evaluate(p, variableDictRow, i, targetVariable);
-    //  }
-    //  p.PearsonR = Statistics.PearsonRFast(p.TrueResults, p.EstimatedResults);
-    //  //var absoluteErrors = p.TrueResult.Zip(p.EstimatedValues, (t, e) => t - e);
-    //  //p.MAE = absoluteErrors.Mean();
-    //  return p.PearsonR;
-    //}
-
-    public double EvaluateDict(RPN<Symbol> p, Dictionary<string, double> variableDict, int idx, string targetVariable) {
-
-      foreach (var symbol in p) {
-        if (symbol.Type == SymbolType.Constant) {
-          evaluationBuffer.Push(symbol.Con.Value);
-        }
-        else if (symbol.Type == SymbolType.Variable) {
-          evaluationBuffer.Push(variableDict[symbol.Var.Name] * symbol.Var.Coefficient);
-        }
-        else {
-          evaluationBuffer.Push(symbol.Opr.Function(evaluationBuffer));
-          //if (operation.Arity == 1) evaluationBuffer.Push(operation.Function(new[] {evaluationBuffer.Pop()}));
-          //else evaluationBuffer.Push(operation.Function(new[] { evaluationBuffer.Pop(), evaluationBuffer.Pop() }));
-        }
-      }
-      var result = evaluationBuffer.Pop();
-      evaluationBuffer.Clear();
-      p.TrueResults[idx] = variableDict[targetVariable];
-      p.EstimatedResults[idx] = result;
-      return p.TrueResults[idx] - result;
-    }
-
-    public double EvaluateArr(RPN<Symbol> program, Task task, DataRecord data) {
-
-      //// V2 parallel
-      //var rangePartitioner = Partitioner.Create(0, rowCount);
-      //Parallel.ForEach(rangePartitioner, (range, state, partialSum) =>
-      //{
-      //  for(int i = range.Item1; i < range.Item2; i++)
-      //  {
-      //    EvaluateParallel(p, localEvaluationBuffer, data, rowCount, i, targetVariableIdx);
-      //  }
-      //});
-
-      // V1 parallel
-      //Parallel.For(0, rowCount, (i, state) =>
-      //{
-      //  EvaluateParallel(p, localEvaluationBuffer, data, rowCount, i, targetVariableIdx);
-      //});
-
-
-      // V0 sequential
-      for (int i = 0; i < data.RowCount; i++) {
-        //Evaluate(p, localEvaluationBuffer, data, rowCount, i, targetVariableIdx);
-        if (double.IsNaN(EvaluateStack(program, data, i))) return double.NaN;
-      }
-
-      program.PearsonR = PearsonR.ComputeScore(program);
-      program.NMSE = NMSE.ComputeScore(program);
-      program.LD = LD.ComputeScore(program);
-
-      return task.Score.Compute(program);
-
-      //p.LD = EvaluateDescriptionLength(p);
-      //p.MRE = Statistics.MRE(p.TrueResults, p.EstimatedResults);      
-      //p.PearsonR = Statistics.PearsonR(p.TrueResults, p.EstimatedResults);
-      //var absoluteErrors = p.TrueResult.Zip(p.EstimatedValues, (t, e) => t - e);      
-      //return p.NMSE;
-    }
-
-    //public double EvaluateSetParallel(RPN<Symbol> p, Stack<double> localEvaluationBuffer, double[] data, int rowCount, int targetVariableIdx) {
-
-    //  //// V2 parallel
-    //  var rangePartitioner = Partitioner.Create(0, rowCount);
-    //  Parallel.ForEach(rangePartitioner, (range, state, partialSum) =>
-    //  {
-    //    for (int i = range.Item1; i < range.Item2; i++) {
-    //      Evaluate(p, localEvaluationBuffer, data, rowCount, i, targetVariableIdx);
-    //    }
-    //  });
-
-    //  // V1 parallel
-    //  //Parallel.For(0, rowCount, (i, state) =>
-    //  //{
-    //  //  EvaluateParallel(p, localEvaluationBuffer, data, rowCount, i, targetVariableIdx);
-    //  //});
-
-
-    //  p.PearsonR = Statistics.PearsonRFast(p.TrueResults, p.EstimatedResults);
-    //  //var absoluteErrors = p.TrueResult.Zip(p.EstimatedValues, (t, e) => t - e);
-    //  //p.MAE = absoluteErrors.Mean();
-    //  return p.PearsonR;
-    //}
-
-    public double EvaluateStack(RPN<Symbol> program, DataRecord data, int ridx) {
-      
-      var localEvaluationBuffer = new Stack<double>();
-
-      foreach (var symbol in program) {
-        if (symbol.Type == SymbolType.Constant) {
-          localEvaluationBuffer.Push(symbol.Con.Value);
-        }
-        else if (symbol.Type == SymbolType.Variable) {
-          localEvaluationBuffer.Push(data.Data[symbol.Var.Index * data.RowCount + ridx] * symbol.Var.Coefficient);
-        }
-        else {
-          var tmpResult = symbol.Opr.Function(localEvaluationBuffer);
-          if (double.IsNaN(tmpResult) || double.IsInfinity(tmpResult) || double.IsNegativeInfinity(tmpResult)) {
-            localEvaluationBuffer.Clear();
-            return double.NaN;
-          }
-          else {
-            localEvaluationBuffer.Push(tmpResult);
-          }
-          //localEvaluationBuffer.Push(symbol.Opr.Function(localEvaluationBuffer));
-
-          //if (operation.Arity == 1) evaluationBuffer.Push(operation.Function(new[] {evaluationBuffer.Pop()}));
-          //else evaluationBuffer.Push(operation.Function(new[] { evaluationBuffer.Pop(), evaluationBuffer.Pop() }));
-        }
-      }
-      var result = localEvaluationBuffer.Pop();
-      if (localEvaluationBuffer.Count > 0) {
-        Console.WriteLine("\n!!! ERROR !!!\n");
-        localEvaluationBuffer.Clear();
-      }
-      if (double.IsNaN(result) || double.IsInfinity(result) || double.IsNegativeInfinity(result)) {
-        return double.NaN;
-      }
-
-      //if (double.IsInfinity(result)) result = double.MaxValue;
-      //else if (double.IsNegativeInfinity(result)) result = double.MinValue;
-
-
-      program.TrueResults[ridx] = data.Data[targetVariableIdx * data.RowCount + ridx]; // not necessary to do this in every evaluation, but it is more convenient to have the true values stored in the program for later use (e.g. for statistics)
-      program.EstimatedResults[ridx] = result;
-      return program.TrueResults[ridx] - result;
-    }
-
-    public double EvaluateProgram(RPN<Symbol> p, Task t, DataRecord data) {
-      // Compile once and cache on the program instance; reuse on every subsequent call
-      // for the same individual (e.g. during constant optimisation inner loops).
-      // CloneDeep (called after crossover/mutation) nulls the cache automatically.
-      p.CompiledDelegate ??= CompileToDelegate(p, data.RowCount);
-      if (p.CompiledDelegate == null) return t.Score.GetPessimal();
-
-      int targetIdx = t.VariableIndices[t.TargetVariable];
-
-      for (int i = 0; i < data.RowCount; i++) {
-        double estimated = p.CompiledDelegate(data.Data, i);
-        if (!double.IsFinite(estimated))
-          return t.Score.GetPessimal();
-
-        p.TrueResults[i]      = data.Data[targetIdx * data.RowCount + i];
-        p.EstimatedResults[i] = estimated;
-      }
-
-      p.PearsonR = PearsonR.ComputeScore(p);
-      p.NMSE = NMSE.ComputeScore(p);
-      p.LD = LD.ComputeScore(p);
-
-      return t.Score.Compute(p);
-    }
-
-    // Translates an RPN<Symbol> expression into a compiled Func<double[], int, double>.
-    // Parameters of the delegate: data array (column-major, stride = rowCount), row index.
-    // Returns null if the program is structurally invalid.
-    private static Func<double[], int, double>? CompileToDelegate(RPN<Symbol> p, int rowCount) {
-      try {
-        // Parameters: data array and row index
-        var dataParam = Expression.Parameter(typeof(double[]), "data");
-        var rowParam  = Expression.Parameter(typeof(int),      "rowIdx");
-
-        var stack = new Stack<Expression>();
-
-        foreach (var symbol in p) {
-          if (symbol.Type == SymbolType.Constant) {
-            // Bake constant value directly as a literal
-            stack.Push(Expression.Constant(symbol.Con.Value, typeof(double)));
-          }
-          else if (symbol.Type == SymbolType.Variable) {
-            // data[varIndex * rowCount + rowIdx]  —  matches EvaluateStack layout
-            int stride = symbol.Var.Index * rowCount;
-            Expression index = stride == 0
-              ? (Expression)rowParam
-              : Expression.Add(Expression.Constant(stride), rowParam);
-            Expression load = Expression.ArrayIndex(dataParam, index);
-
-            // Apply coefficient if not 1.0
-            Expression varExpr = symbol.Var.Coefficient != 1.0
-              ? Expression.Multiply(load, Expression.Constant(symbol.Var.Coefficient))
-              : load;
-
-            stack.Push(varExpr);
-          }
-          else // Operator
-          {
-            Expression? node = BuildOperatorExpression(symbol.Opr, stack);
-            if (node == null) return null;
-            stack.Push(node);
-          }
-        }
-
-        if (stack.Count != 1) return null;
-
-        var body   = stack.Pop();
-        var lambda = Expression.Lambda<Func<double[], int, double>>(body, dataParam, rowParam);
-        return lambda.Compile();
-      }
-      catch {
-        return null;
-      }
-    }
-
-    // Pops operands from the expression stack and returns the combined Expression node.
-    // Pop order mirrors EvaluateStack: first Pop() = top of stack = right operand.
-    private static Expression? BuildOperatorExpression(Operator opr, Stack<Expression> stack) {
-      if (opr.Arity == 1) {
-        if (stack.Count < 1) return null;
-        Expression arg = stack.Pop();
-
-        return opr.Symbol switch {
-          "sin"  => Expression.Call(_miSin,  arg),
-          "cos"  => Expression.Call(_miCos,  arg),
-          "tan"  => Expression.Call(_miTan,  arg),
-          "tanh" => Expression.Call(_miTanh, arg),
-          "log"  => Expression.Call(_miLog,  arg),
-          // protected log: value > 0 ? log(value) : 0.0
-          "plog" => Expression.Condition(
-                      Expression.GreaterThan(arg, Expression.Constant(0.0)),
-                      Expression.Call(_miLog, arg),
-                      Expression.Constant(0.0)),
-          "exp"  => Expression.Call(_miExp,  arg),
-          // protected exp: exp(clamp(value, -100, 100))
-          "pexp" => Expression.Call(_miExp,
-                      Expression.Call(_miMin,
-                        Expression.Call(_miMax, arg, Expression.Constant(-100.0)),
-                        Expression.Constant(100.0))),
-          "pi"   => Expression.Multiply(arg, Expression.Constant(Math.PI)),
-          _      => null
-        };
-      }
-      else if (opr.Arity == 2) {
-        if (stack.Count < 2) return null;
-        Expression right = stack.Pop(); // top = right operand (matches stack pop order)
-        Expression left  = stack.Pop();
-
-        return opr.Symbol switch {
-          "+"  => Expression.Add(left, right),
-          "-"  => Expression.Subtract(left, right),
-          "*"  => Expression.Multiply(left, right),
-          "/"  => Expression.Divide(left, right),
-          // protected division: denominator != 0 ? numerator / denominator : 1.0
-          "pd" => Expression.Condition(
-                    Expression.NotEqual(right, Expression.Constant(0.0)),
-                    Expression.Divide(left, right),
-                    Expression.Constant(1.0)),
-          // analytic quotient: left / sqrt(1 + right²)
-          "aq" => Expression.Divide(left,
-                    Expression.Call(_miSqrt,
-                      Expression.Add(
-                        Expression.Constant(1.0),
-                        Expression.Multiply(right, right)))),
-          _    => null
-        };
-      }
-
-      return null;
-    }
-
-    public double EvaluateDescriptionLength(RPN<Symbol> p) {
-      // Implements the description length L(D) = aifeyn + codelen + negloglike
-      // as defined by Bartlett et al. (2022), https://arxiv.org/abs/2211.11461
-      // Reference implementation: https://github.com/DeaglanBartlett/ESR
-
-      // ── 1. aifeyn: structural description length of the expression tree ────
-      // L_func = n_nodes * ln(nop) + Σ ln(|integer constants|)
-      // where nop = number of distinct operator/function tokens
-      //           + 1 if any free parameter (variable or fitted constant) exists.
-      var distinctOperatorSymbols = new HashSet<string>();
-      bool hasFreeParam = false;
-      double integerPenalty = 0.0;
-
-      foreach (var sym in p) {
-        if (sym.Type == SymbolType.Operator) {
-          distinctOperatorSymbols.Add(sym.Opr.Symbol);
-        } else {
-          hasFreeParam = true;
-          if (sym.Type == SymbolType.Constant) {
-            // integer-valued constants contribute ln(|n|); treat 0 as 1 (ln(1)=0)
-            double absVal = Math.Abs(sym.Con.Value);
-            if (absVal == Math.Floor(absVal) && absVal > 0)
-              integerPenalty += Math.Log(absVal);
-          }
-        }
-      }
-
-      int nop = distinctOperatorSymbols.Count + (hasFreeParam ? 1 : 0);
-      if (nop < 1) nop = 1;
-      double aifeyn = p.Count * Math.Log(nop) + integerPenalty;
-
-      // ── 2. codelen: parametric description length (MDL, without Fisher) ────
-      // L_param = -k/2 * ln(3) + Σ ln(max(1, |θ_i|))
-      // where k = number of free numerical parameters (constants + coefficients ≠ 1)
-      double codelength = 0.0;
-      int k = 0;
-
-      foreach (var sym in p) {
-        double theta = double.NaN;
-        if (sym.Type == SymbolType.Constant)
-          theta = sym.Con.Value;
-        else if (sym.Type == SymbolType.Variable && sym.Var.Coefficient != 1.0)
-          theta = sym.Var.Coefficient;
-
-        if (!double.IsNaN(theta)) {
-          k++;
-          codelength += Math.Log(Math.Max(1.0, Math.Abs(theta)));
-        }
-      }
-
-      codelength -= k / 2.0 * Math.Log(3.0);
-
-      // ── 3. negloglike: Gaussian negative log-likelihood ─────────────────────
-      // Mirrors GaussLikelihood.negloglike in ESR (likelihood.py):
-      //   nll = Σ [ 0.5*(ŷᵢ - yᵢ)²/σᵢ² + 0.5*ln(2π) + ln(σᵢ) ]
-      //
-      // We don't have per-point measurement uncertainties, so we use a fixed σ
-      // estimated from the *target variable's own standard deviation* (independent
-      // of this model). This keeps σ constant across all models so that
-      // Σ (rᵢ/σ)² genuinely discriminates between good and bad fits — a model
-      // that fits poorly accumulates a large quadratic penalty, not just a small
-      // logarithmic one.
-      int n = p.TrueResults.Count;
-
-      double yMean = 0.0;
-      for (int i = 0; i < n; i++) yMean += p.TrueResults[i];
-      yMean /= n;
-
-      double yVar = 0.0;
-      for (int i = 0; i < n; i++) {
-        double d = p.TrueResults[i] - yMean;
-        yVar += d * d;
-      }
-      yVar /= n;
-
-      // Guard: if the target is perfectly constant use a unit scale
-      double sigma = yVar > 0.0 ? Math.Sqrt(yVar) : 1.0;
-      double sigma2 = sigma * sigma;
-
-      double negloglike = 0.0;
-      for (int i = 0; i < n; i++) {
-        double r = p.EstimatedResults[i] - p.TrueResults[i];
-        negloglike += 0.5 * r * r / sigma2 + 0.5 * Math.Log(2.0 * Math.PI) + Math.Log(sigma);
-      }
-
-      // ── Total description length ────────────────────────────────────────────
-      p.LD = aifeyn + codelength + negloglike;
-      return p.LD;
-    }
-
-
-    #endregion Evaluators
-
-    #region Penalizers
-
-    public double PenalizePearsonR(RPN<Symbol> o) {
-      o.PearsonR = o.Count > SymbolCount ? o.PearsonR * (SymbolCount / (double)o.Count) : o.PearsonR;
-      return o.PearsonR;
-    }
-
-    public double PenalizeNMSE(RPN<Symbol> o) {
-      o.NMSE = o.Count > SymbolCount ? o.NMSE * ((double)o.Count / SymbolCount) : o.NMSE;
-      return o.NMSE;
-    }
-
-    #endregion Penalizers
 
     #region Helpers
 

@@ -9,7 +9,7 @@ namespace PGP.Core {
 
     public static Tuple<RPN<Symbol>, double> OptimizeConstantsViaEvolutionStrategy(PgpAlgorithm pgp, RPN<Symbol> program, Task task, DataRecord data) {
       var p = program.CloneDeep();
-      double pFit = pgp.EvaluateArr(p, task, data);
+      double pFit = pgp.Evaluate(pgp, p, task, data);
       var pNew = p.CloneDeep();
       var pNewFit = pFit;
 
@@ -37,7 +37,7 @@ namespace PGP.Core {
 
           var pMutated = pNew.CloneDeep();
           UpdateConstant(pMutated, constantMutated, indices[idx]);
-          var pMutatedFit = pgp.EvaluateArr(pMutated, task, data);
+          var pMutatedFit = pgp.Evaluate(pgp,pMutated, task, data);
 
           if (!double.IsNaN(pMutatedFit) && task.Score.IsBetter(pMutatedFit, pNewFit)) {
             constantsNew[idx] = constantMutated;
@@ -51,7 +51,7 @@ namespace PGP.Core {
       }
 
       // sanity check and final swap
-      pNewFit = pgp.EvaluateArr(pNew, task, data);
+      pNewFit = pgp.Evaluate(pgp,pNew, task, data);
       if (task.Score.IsBetter(pNewFit, pFit)) {
         p = pNew;
         pFit = pNewFit;
@@ -61,7 +61,7 @@ namespace PGP.Core {
 
     public static Tuple<RPN<Symbol>, double> OptimizeConstants(PgpAlgorithm pgp, RPN<Symbol> program, Task task, DataRecord data) {
       var p = program.CloneDeep();
-      double pFit = pgp.EvaluateArr(p, task, data);
+      double pFit = pgp.Evaluate(pgp, p, task, data);
 
       var constAndIdx = ParseConstants(p);
       double[] constants = constAndIdx.Item1;
@@ -87,8 +87,8 @@ namespace PGP.Core {
           UpdateConstant(pPlus, constants[i] + h, constIndices[i]);
           UpdateConstant(pMinus, constants[i] - h, constIndices[i]);
 
-          double fPlus = pgp.EvaluateArr(pPlus, task, data);
-          double fMinus = pgp.EvaluateArr(pMinus, task, data);
+          double fPlus = pgp.Evaluate(pgp, pPlus, task, data);
+          double fMinus = pgp.Evaluate(pgp, pMinus, task, data);
           if (double.IsNaN(fPlus) || double.IsNaN(fMinus)) continue;
           gradient[i] = Math.Clamp((fPlus - fMinus) / (2.0 * h), -gradClip, gradClip);
         }
@@ -99,7 +99,7 @@ namespace PGP.Core {
         var pNew = p.CloneDeep();
         UpdateConstants(pNew, constants, constIndices);
 
-        double newFit = pgp.EvaluateArr(pNew, task, data);
+        double newFit = pgp.Evaluate(pgp, pNew, task, data);
         if (!double.IsNaN(newFit) && task.Score.IsBetter(newFit, pFit)) {
           p = pNew;
           pFit = newFit;
@@ -113,7 +113,7 @@ namespace PGP.Core {
 
     public static Tuple<RPN<Symbol>, double> OptimizeCoefficientsAndConstants(PgpAlgorithm pgp, RPN<Symbol> program, Task task, DataRecord data) {
       var p = program.CloneDeep();
-      double pFit = pgp.EvaluateArr(p, task, data);
+      double pFit = pgp.Evaluate(pgp, p, task, data);
 
       var constAndIdx = ParseConstants(p);
       var coefAndIdx = ParseCoefficients(p);
@@ -150,8 +150,8 @@ namespace PGP.Core {
             UpdateCoefficient(pMinus, coefficients[ci] - h, coefIndices[ci]);
           }
 
-          double fPlus = pgp.EvaluateArr(pPlus, task, data);
-          double fMinus = pgp.EvaluateArr(pMinus, task, data);
+          double fPlus = pgp.Evaluate(pgp, pPlus, task, data);
+          double fMinus = pgp.Evaluate(pgp, pMinus, task, data);
           if (double.IsNaN(fPlus) || double.IsNaN(fMinus)) continue;
           gradient[i] = Math.Clamp((fPlus - fMinus) / (2.0 * h), -gradClip, gradClip);
         }
@@ -170,7 +170,7 @@ namespace PGP.Core {
         UpdateConstants(pNew, constants, constIndices);
         UpdateCoefficients(pNew, coefficients, coefIndices);
 
-        double newFit = pgp.EvaluateArr(pNew, task, data);
+        double newFit = pgp.Evaluate(pgp, pNew, task, data);
         if (!double.IsNaN(newFit) && task.Score.IsBetter(newFit, pFit)) {
           p = pNew;
           pFit = newFit;
