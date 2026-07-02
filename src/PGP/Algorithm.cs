@@ -70,6 +70,25 @@ namespace PGP.Core {
     public int NestingDepth { get; set; }
     public double OperatorToOperandRatio { get; set; }
 
+    public List<Function> SelectedNonterminals = [
+      Functions.Addition,
+      Functions.Subtraction,
+      Functions.Multiplication,
+      Functions.AnalyticQuotient,
+      Functions.ProtectedLogarithm,
+      Functions.ProtectedExponential,
+      Functions.Sine,
+      Functions.Cosine,
+      Functions.Tangent,
+      Functions.HyperbolicTangent,
+      Functions.Pi
+    ];
+
+    public List<Terminal> SelectedTerminals = [
+      Terminal.Variable,
+      Terminal.Constant
+    ];
+
 
     // GP Operators
     public Func<PgpAlgorithm, RPN<Symbol>> Breed { get; set; } = Creation.BreedConstrained;
@@ -146,7 +165,7 @@ namespace PGP.Core {
       LogStatistics = false;
 
       population = new RPN<Symbol>[PopulationSize];
-      OperatorToOperandRatio = 1.0 * Operators.All.Count / Operators.All.Sum(x => x.Arity);
+      OperatorToOperandRatio = 1.0 * Functions.All.Count / Functions.All.Sum(x => x.Arity);
     }
 
 
@@ -525,7 +544,7 @@ namespace PGP.Core {
               }
               if (rightIsSingleConst && rightVal < 0.0) {           // x + (-c) => x - c
                 p[rightStart].Con.Value = -rightVal;
-                p[i] = new Symbol(Operators.Subtraction); changed = true; break;
+                p[i] = new Symbol(Functions.Subtraction); changed = true; break;
               }
               // (x + c1) + c2 => x + (c1+c2)
               if (rightIsSingleConst && p[leftEnd].Type == SymbolType.Operator && p[leftEnd].Opr.Symbol == "+") {
@@ -543,7 +562,7 @@ namespace PGP.Core {
                 p.RemoveRange(leftStart, i - leftStart + 1);
                 p.Insert(leftStart, new Symbol(new Constant("c", 2.0)));
                 p.InsertRange(leftStart + 1, xCopy);
-                p.Insert(leftStart + 1 + xCopy.Count, new Symbol(Operators.Multiplication));
+                p.Insert(leftStart + 1 + xCopy.Count, new Symbol(Functions.Multiplication));
                 changed = true; break;
               }
               // sin²(x) + cos²(x) => 1  (Pythagorean identity)
@@ -565,7 +584,7 @@ namespace PGP.Core {
               }
               if (rightIsSingleConst && rightVal < 0.0) {           // x - (-c) => x + c
                 p[rightStart].Con.Value = -rightVal;
-                p[i] = new Symbol(Operators.Addition); changed = true; break;
+                p[i] = new Symbol(Functions.Addition); changed = true; break;
               }
               // (x - c1) - c2 => x - (c1+c2)
               if (rightIsSingleConst && p[leftEnd].Type == SymbolType.Operator && p[leftEnd].Opr.Symbol == "-") {
@@ -609,7 +628,7 @@ namespace PGP.Core {
               }
               if (rightIsSingleConst && rightVal == -1.0) {         // x * -1 => 0 - x
                 p[rightStart].Con.Value = 0.0;
-                p[i] = new Symbol(Operators.Subtraction); changed = true; break;
+                p[i] = new Symbol(Functions.Subtraction); changed = true; break;
               }
               // (x * c1) * c2 => x * (c1*c2)
               if (rightIsSingleConst && p[leftEnd].Type == SymbolType.Operator && p[leftEnd].Opr.Symbol == "*") {
@@ -635,7 +654,7 @@ namespace PGP.Core {
               }
               if (opr.Symbol == "/" && rightIsSingleConst && rightVal != 0.0) { // x / c => x * (1/c)
                 p[rightStart].Con.Value = 1.0 / rightVal;
-                p[i] = new Symbol(Operators.Multiplication); changed = true; break;
+                p[i] = new Symbol(Functions.Multiplication); changed = true; break;
               }
               if (SubtreesAreEqual(p, leftStart, leftEnd, rightStart, rightEnd)) { // x / x => 1
                 ReplaceWithConstant(p, leftStart, i, 1.0); changed = true; break;
@@ -679,8 +698,8 @@ namespace PGP.Core {
                 p.InsertRange(leftStart, xCopy);
                 p.InsertRange(leftStart + xCopy.Count, aCopy);
                 p.InsertRange(leftStart + xCopy.Count + aCopy.Count, bCopy);
-                p.Insert(leftStart + xCopy.Count + aCopy.Count + bCopy.Count, new Symbol(opr == Operators.Addition ? Operators.Addition : Operators.Subtraction));
-                p.Insert(leftStart + xCopy.Count + aCopy.Count + bCopy.Count + 1, new Symbol(Operators.Multiplication));
+                p.Insert(leftStart + xCopy.Count + aCopy.Count + bCopy.Count, new Symbol(opr == Functions.Addition ? Functions.Addition : Functions.Subtraction));
+                p.Insert(leftStart + xCopy.Count + aCopy.Count + bCopy.Count + 1, new Symbol(Functions.Multiplication));
                 changed = true; break;
               }
             }
@@ -726,7 +745,7 @@ namespace PGP.Core {
         if (s.Type == SymbolType.Constant)
           stack.Push(s.Con.Value);
         else if (s.Type == SymbolType.Operator)
-          stack.Push(s.Opr.Function(stack));
+          stack.Push(s.Opr.Term(stack));
       }
       return stack.Count == 1 ? stack.Pop() : double.NaN;
     }

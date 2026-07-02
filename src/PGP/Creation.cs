@@ -52,7 +52,7 @@ namespace PGP.Core {
           p.Add(curSmybol);
           tCount++;
         } else {
-          curSmybol = new Symbol(Operators.SelectRandom(pgp.Rng));
+          curSmybol = new Symbol(Functions.SelectRandom(pgp));
           if (tCount >= curSmybol.Opr.Arity) {
             tCount -= curSmybol.Opr.Arity - 1;
             p.Add(curSmybol);
@@ -61,7 +61,7 @@ namespace PGP.Core {
       }
 
       while (tCount > 1) {
-        curSmybol = new Symbol(Operators.SelectRandom(pgp.Rng));
+        curSmybol = new Symbol(Functions.SelectRandom(pgp));
         if (tCount >= curSmybol.Opr.Arity) {
           tCount -= curSmybol.Opr.Arity - 1;
           p.Add(curSmybol);
@@ -101,7 +101,7 @@ namespace PGP.Core {
 
         if (pgp.Rng.NextDouble() < pOperator) {
           int budgetSnapshot = budget;
-          var feasible = Operators.All.Where(op => budgetSnapshot >= op.Arity + 1).ToList();
+          var feasible = Functions.All.Where(op => budgetSnapshot >= op.Arity + 1).ToList();
           if (feasible.Count > 0) {
             var op = feasible[pgp.Rng.Next(feasible.Count)];
             budget--; // consume this operator's own symbol slot

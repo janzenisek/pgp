@@ -1,125 +1,124 @@
 ﻿using PGP.Utils;
 
 namespace PGP.Core {
-  public static class Operators {
-    //public static Operator Addition = new Operator(new(x => x[0] + x[1]), 2);
-    //public static Operator Subtraction = new Operator(x => x[0] - x[1], 2);
-    //public static Operator Multiplication = new Operator(x => x[0] * x[1], 2);
-    //public static Operator Division = new Operator(x => x[0] / x[1], 2);
-    //public static Operator Sine = new Operator(x => Math.Sin(x[0]), 1);
-    //public static Operator Cosine = new Operator(x => Math.Cos(x[0]), 1);
-    //public static Operator Tangent = new Operator(x => Math.Tan(x[0]), 1);
-    //public static Operator HyperbolicTangent = new Operator(x => Math.Tanh(x[0]), 1);
-    //public static Operator Logarithm = new Operator(x => Math.Log(x[0]), 1);
-    //public static Operator Exponential = new Operator(x => Math.Exp(x[0]), 1);
 
-    public static Operator Addition = new Operator(
+  public interface ITerminal {
+    string Name { get; set; }
+  }
+
+  public interface INonterminal {
+    string Name { get; set; }
+  }
+
+  public static class Functions {
+
+    public static Function Addition = new Function(
       x => x.Pop() + x.Pop()
       , 2, "+", "Addition");
-    public static Operator Subtraction = new Operator(
+    public static Function Subtraction = new Function(
       x => x.Pop() - x.Pop()
       , 2, "-", "Subtraction");
-    public static Operator Multiplication = new Operator(
+    public static Function Multiplication = new Function(
       x => x.Pop() * x.Pop()
       , 2, "*", "Multiplication");
-    public static Operator Division = new Operator(
+    public static Function Division = new Function(
       x => x.Pop() / x.Pop() // insecure, possibly delivers NaNs
       , 2, "/", "Division");
-    public static Operator ProtectedDivision = new Operator(
+    public static Function ProtectedDivision = new Function(
       x => {
         double denominator = x.Pop();
         double numerator = x.Pop();
         return denominator != 0 ? numerator / denominator : 1.0; // protected division
       }
       , 2, "pd", "ProtectedDivision");
-    public static Operator AnalyticQuotient = new Operator(
+    public static Function AnalyticQuotient = new Function(
       x => {
         double denominator = x.Pop();
         double numerator = x.Pop();
         return numerator / Math.Sqrt(1.0 + denominator * denominator); // analytic quotient
       }
       , 2, "aq", "AnalyticQuotient");
-    public static Operator Sine = new Operator(
+    public static Function Sine = new Function(
       x => Math.Sin(x.Pop())
       , 1, "sin", "Sine");
-    public static Operator Cosine = new Operator(
+    public static Function Cosine = new Function(
       x => Math.Cos(x.Pop())
       , 1, "cos", "Cosine");
-    public static Operator Tangent = new Operator(
+    public static Function Tangent = new Function(
       x => Math.Tan(x.Pop())
       , 1, "tan", "Tangent");
-    public static Operator HyperbolicTangent = new Operator(
+    public static Function HyperbolicTangent = new Function(
       x => Math.Tanh(x.Pop())
       , 1, "tanh", "HyperbolicTangent");
-    public static Operator Logarithm = new Operator(
+    public static Function Logarithm = new Function(
       x => Math.Log(x.Pop()) // insecure, possibly delivers NaNs      
       , 1, "log", "Logarithm");
-    public static Operator ProtectedLogarithm = new Operator(
+    public static Function ProtectedLogarithm = new Function(
       x => {
         double value = x.Pop();
         return value > 0 ? Math.Log(value) : 0.0; // protected logarithm
       }
       , 1, "plog", "ProtectedLogarithm");
-    public static Operator Exponential = new Operator(
+    public static Function Exponential = new Function(
       x => Math.Exp(x.Pop())
       , 1, "exp", "Exponential");
-    public static Operator ProtectedExponential = new Operator(
+    public static Function ProtectedExponential = new Function(
       x => {
         double value = x.Pop();
         return Math.Exp(Math.Min(Math.Max(value, -100), 100)); // protected exponential
       }
       , 1, "pexp", "ProtectedExponential");
-    public static Operator Pi = new Operator(
+    public static Function Pi = new Function(
       x => x.Pop() * Math.PI, 1, "pi", "Pi");
 
-    public static List<Operator> All = new() {
+    public static List<Function> All = new() {
       Addition
       ,Subtraction
       ,Multiplication
-      //,Division // depr: insecure
-      //,ProtectedDivision // depr: impricise
+      ,Division // depr: insecure
+      ,ProtectedDivision // depr: impricise
       ,AnalyticQuotient
       ,Sine
       ,Cosine
       ,Tangent
       ,HyperbolicTangent
-      //,Logarithm // depr: insecure
+      ,Logarithm // depr: insecure
       ,ProtectedLogarithm
-      //,Exponential // depr: insecure
+      ,Exponential // depr: insecure
       ,ProtectedExponential
-      //,Pi // currently not in use
+      ,Pi // currently not in use
     };
 
-    public static Operator SelectRandom(FastRandom rng) {
-      return All.ElementAt(rng.Next(All.Count()));
+    public static Function SelectRandom(PgpAlgorithm pgp) {
+      return pgp.SelectedNonterminals.ElementAt(pgp.Rng.Next(pgp.SelectedNonterminals.Count()));
     }
 
-    public static Operator SelectRandom(FastRandom rng, int arity) {
-      var ops = All.Where(x => x.Arity == arity);
-      return ops.ElementAt(rng.Next(ops.Count()));
+    public static Function SelectRandom(PgpAlgorithm pgp, int arity) {
+      var ops = pgp.SelectedNonterminals.Where(x => x.Arity == arity);
+      return ops.ElementAt(pgp.Rng.Next(ops.Count()));
     }
 
-    public static Operator SelectRandomDifferent(FastRandom rng, Operator op) {
-      var ops = All.Where(x => x.Arity == op.Arity && x != op);
-      return ops.ElementAt(rng.Next(ops.Count()));
+    public static Function SelectRandomDifferent(PgpAlgorithm pgp, Function op) {
+      var ops = pgp.SelectedNonterminals.Where(x => x.Arity == op.Arity && x != op);
+      return ops.ElementAt(pgp.Rng.Next(ops.Count()));
     }
   }
 
-  public class Operator {
-    public Func<Stack<double>, double> Function { get; set; }
+  public class Function : INonterminal {
+    public Func<Stack<double>, double> Term { get; set; }
     public int Arity { get; set; }
     public string Symbol { get; set; }
     public string Name { get; set; }
 
-    public Operator(Func<Stack<double>, double> function, int arity, string symbol, string name) {
-      Function = function;
+    public Function(Func<Stack<double>, double> term, int arity, string symbol, string name) {
+      Term = term;
       Arity = arity;
       Symbol = symbol;
       Name = name;
     }
   }
 
-  public class Variable {
+  public class Variable : ITerminal {
     public string Name { get; set; }
     public int Index { get; set; }
     public double Coefficient { get; set; }
@@ -133,7 +132,7 @@ namespace PGP.Core {
     public Variable Clone() => new Variable(Name, Index, Coefficient);
   }
 
-  public class Constant {
+  public class Constant : ITerminal {
     public string Name { get; set; }
     public double Value { get; set; }
 
@@ -160,11 +159,11 @@ namespace PGP.Core {
     public SymbolType Type { get; set; }
     public Variable Var { get; set; }
     public Constant Con { get; set; }
-    public Operator Opr { get; set; }
+    public Function Opr { get; set; }
 
     public Symbol(Variable var) { Var = var; Type = SymbolType.Variable; }
     public Symbol(Constant con) { Con = con; Type = SymbolType.Constant; }
-    public Symbol(Operator opr) { Opr = opr; Type = SymbolType.Operator; }
+    public Symbol(Function opr) { Opr = opr; Type = SymbolType.Operator; }
 
     // Operators are stateless (immutable lambdas) and shared by design — only
     // Variable and Constant carry mutable state and must be deep-copied.
@@ -185,4 +184,5 @@ namespace PGP.Core {
   }
 
   public enum SymbolType { Variable, Constant, Operator }
+  public enum Terminal { Variable, Constant }
 }

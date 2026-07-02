@@ -78,7 +78,7 @@ namespace PGP.Core {
         // grow: wrap this terminal in a new binary operator + a new random terminal
         // (bounded by SymbolCount so the tree can't exceed the size limit)
         if (p.Count + 2 <= pgp.SymbolCount && pgp.Rng.NextDouble() < 0.25) {
-          var binaryOps = Operators.All.Where(op => op.Arity == 2).ToList();
+          var binaryOps = Functions.All.Where(op => op.Arity == 2).ToList();
           if (binaryOps.Count > 0) {
             var op = binaryOps[pgp.Rng.Next(binaryOps.Count)];
             int ctr = 0;
@@ -117,7 +117,7 @@ namespace PGP.Core {
           }
         } else // replace operator with a different one of the same arity
           {
-          p[idx].Opr = Operators.SelectRandomDifferent(pgp.Rng, p[idx].Opr);
+          p[idx].Opr = Functions.SelectRandomDifferent(pgp, p[idx].Opr);
         }
       }
 

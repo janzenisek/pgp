@@ -39,7 +39,7 @@ namespace PGP.Core {
           } else if (symbol.Type == SymbolType.Variable) {
             localEvaluationBuffer.Push(data.Data[symbol.Var.Index * data.RowCount + i] * symbol.Var.Coefficient);
           } else {
-            var tmpResult = symbol.Opr.Function(localEvaluationBuffer);
+            var tmpResult = symbol.Opr.Term(localEvaluationBuffer);
             if (double.IsNaN(tmpResult) || double.IsInfinity(tmpResult) || double.IsNegativeInfinity(tmpResult)) {
               localEvaluationBuffer.Clear();
               return double.NaN;
@@ -257,7 +257,7 @@ namespace PGP.Core {
 
     // Pops operands from the expression stack and returns the combined Expression node.
     // Pop order mirrors EvaluateStack: first Pop() = top of stack = right operand.
-    private static Expression? BuildOperatorExpression(Operator opr, Stack<Expression> stack) {
+    private static Expression? BuildOperatorExpression(Function opr, Stack<Expression> stack) {
       if (opr.Arity == 1) {
         if (stack.Count < 1) return null;
         Expression arg = stack.Pop();

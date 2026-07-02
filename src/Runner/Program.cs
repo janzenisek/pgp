@@ -30,7 +30,7 @@ namespace PGP.Runner {
 
 
       // --- configure data set and modeling task
-      DataSet trainingSetOriginalOrder = ds.Subset(0, 100);           
+      DataSet trainingSetOriginalOrder = ds.Subset(0, 100);
       DataSet trainingSet = trainingSetOriginalOrder.Shuffle(fr);
       Core.Task modelingTask = new Core.Task(
         name: "GeoTorus",
@@ -43,15 +43,35 @@ namespace PGP.Runner {
 
 
       // --- configure gp hyperparameters
-      var pgp = new PgpAlgorithm(randomNumberGenerator:fr,
-        generations:100,
-        populationSize:100,
-        symbolCount:25,
-        nestingDepth:10,
-        crossoverRate:0.9,
-        mutationRate:0.25,
-        maximumSelectionPressure:1000,
-        elites:1);
+      var pgp = new PgpAlgorithm(randomNumberGenerator: fr,
+        generations: 100,
+        populationSize: 100,
+        symbolCount: 25,
+        nestingDepth: 10,
+        crossoverRate: 0.9,
+        mutationRate: 0.25,
+        maximumSelectionPressure: 1000,
+        elites: 5);
+
+      // --- configure gp symbol set (grammar)
+      pgp.SelectedNonterminals = [
+        Functions.Addition,
+        Functions.Subtraction,
+        Functions.Multiplication,
+        Functions.AnalyticQuotient,
+        Functions.ProtectedLogarithm,
+        Functions.ProtectedExponential,
+        Functions.Sine,
+        Functions.Cosine,
+        Functions.Tangent,
+        Functions.HyperbolicTangent,
+        Functions.Pi
+      ];
+
+      pgp.SelectedTerminals = [
+        Terminal.Variable,
+      Terminal.Constant
+      ];
 
 
       // --- configure gp operators
@@ -66,26 +86,26 @@ namespace PGP.Runner {
       // --- configure algorithm options
       pgp.LogStatistics = true;
       pgp.UseParallelization = true;
-      pgp.PerformSimplification = true;
+      pgp.PerformSimplification = false;
       pgp.OptimizationIterations = 10;
 
 
       // --- run gp algorithm
       Console.WriteLine("Starting GPSR...");
       Console.WriteLine("(press any key to stop computation)\n");
-      
+
       Stopwatch sw = new Stopwatch();
       bool k = false;
       var cts = new CancellationTokenSource();
       sw.Start();
       System.Threading.Tasks.Task t = pgp.Fit(modelingTask, trainingSet, cts.Token); // gp algorithm execution
-      
+
       while (!k && !t.IsCompleted) {
         k = Console.KeyAvailable;
         t.Wait(100);
       }
       cts.Cancel();
-      t.Wait(1000);      
+      t.Wait(1000);
       sw.Stop();
 
 

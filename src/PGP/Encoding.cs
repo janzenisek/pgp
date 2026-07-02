@@ -136,7 +136,7 @@ namespace PGP.Core {
     public string ToInfixString() {
       // (expression, precedence) where higher precedence = binds tighter
       // unary functions get int.MaxValue so they never need extra parens
-      static int Precedence(Core.Operator opr) => opr.Symbol switch {
+      static int Precedence(Core.Function opr) => opr.Symbol switch {
         "+" or "-" => 1,
         "*" or "/" => 2,
         _          => int.MaxValue  // unary: sin, cos, etc.
@@ -144,7 +144,7 @@ namespace PGP.Core {
 
       // subtraction and division are left-associative, so the right operand
       // needs parentheses when it has equal precedence, e.g. a - (b - c)
-      static bool IsLeftAssociative(Core.Operator opr) =>
+      static bool IsLeftAssociative(Core.Function opr) =>
         opr.Symbol == "-" || opr.Symbol == "/";
 
       var stack = new Stack<(string Expr, int Prec)>();
