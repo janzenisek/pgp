@@ -69,6 +69,8 @@ namespace PGP.Core {
     public int SymbolCount { get; set; }
     public int NestingDepth { get; set; }
     public double OperatorToOperandRatio { get; set; }
+    public int TournamentSize { get; set; } = 5;
+
 
     public List<Function> SelectedNonterminals = [
       Functions.Addition,
@@ -115,8 +117,7 @@ namespace PGP.Core {
     public double MinMAE => population.Min(x => x.MAE);
     public double MinNMSE => population.Min(x => x.NMSE);
     public double MinLength => population.Min(x => x.Count);
-    public double MinLD => population.Min(x => x.LD);
-
+    public double MinLD => population.Min(x => x.LD);    
     public string BestProgram => population.OrderBy(x => OrderByScore(x, Task.Metric)).First().ToInfixString();
     public string BestProgramRPN => population.OrderBy(x => OrderByScore(x, Task.Metric)).First().ToString();
     public double BestProgramPearsonR => population.OrderBy(x => OrderByScore(x, Task.Metric)).First().PearsonR;
@@ -131,8 +132,8 @@ namespace PGP.Core {
 
     private double OrderByScore(RPN<Symbol> p, Metric m = Metric.NMSE) { 
       return m switch {
-        Metric.PearsonR => 1.0-(p.PearsonR*p.PearsonR),
-        Metric.PearsonR2 => 1.0-p.PearsonR2,
+        Metric.PearsonR => 1.0 - p.PearsonR,
+        Metric.PearsonR2 => 1.0 - p.PearsonR2,
         Metric.NMSE => p.NMSE,
         Metric.MRE => p.MRE,
         Metric.LD => p.LD,
@@ -228,9 +229,19 @@ namespace PGP.Core {
       var sizeDiffAfterCrossover = new List<double>();
       var sizeDiffAfterMutation = new List<double>();
 
+      // Pre-fill all elite slots: populationNew[1..Elites-1] are Clone() objects with zero
+      // stats that the loop never overwrites. After the first swap those zeros end up in
+      // population[], corrupting every statistic property that reads the array.
+      for (int e = 1; e < Elites; e++) {
+        populationNew[e] = (RPN<Symbol>)population[e].CloneDeepWithResults();
+        fitScoresNew[e] = fitScores[e];
+      }
+      populationNew[0] = (RPN<Symbol>)bestSolution.CloneDeepWithResults();
+      fitScoresNew[0] = bestFitScore;
+
       for (int g = 0; g < Generations && currentSelectionPressure < MaximumSelectionPressure; g++) // g = generation
       {
-        if (ct.IsCancellationRequested) return;
+        if (ct.IsCancellationRequested) break;
 
         int generationalEvaluationCount = 0;        
         double sumFitScores = Task.Score.GetScoreSum(fitScores);
@@ -310,8 +321,8 @@ namespace PGP.Core {
               i++;
               //} // OS
             } else {
-              Console.WriteLine("Evaluation resulted in NaN.");
-              Console.WriteLine(populationNew[i].ToInfixString());
+              //Console.WriteLine("Evaluation resulted in NaN.");
+              //Console.WriteLine(populationNew[i].ToInfixString());
             }
 
             //lock (locker) currentSelectionPressure = generationalEvaluations / (double)PopulationSize;
@@ -329,7 +340,12 @@ namespace PGP.Core {
         populationNew = tmpPopulation;
         fitScoresNew = tmpFitScores;
 
-        // keep elite        
+        // keep all elite slots: slot 0 = best overall; slots 1..Elites-1 = recently evaluated
+        // offspring so they always carry up-to-date stats (never stale zero-metrics Clones).
+        for (int e = 1; e < Elites; e++) {
+          populationNew[e] = (RPN<Symbol>)population[Elites + e - 1].CloneDeepWithResults();
+          fitScoresNew[e] = fitScores[Elites + e - 1];
+        }
         populationNew[0] = (RPN<Symbol>)bestSolution.CloneDeepWithResults();
         fitScoresNew[0] = bestFitScore;
 
@@ -345,6 +361,11 @@ namespace PGP.Core {
           sizeDiffAfterMutation.Clear();
         }
       }
+      
+      // Sync the final best solution into population[0] so that the public statistics
+      // properties always reflect the overall best found during the run.
+      population[0] = (RPN<Symbol>)bestSolution.CloneDeepWithResults();
+      fitScores[0] = bestFitScore;
 
       if (LogStatistics) {
         Console.WriteLine();
@@ -353,7 +374,7 @@ namespace PGP.Core {
       }
     }
 
-    public void Run() {
+    public void Run() { 
       var score = Task.Score;
 
       double[] fitScores = GetScores(Task.Metric);
@@ -363,6 +384,15 @@ namespace PGP.Core {
       var bestSolution = (RPN<Symbol>)population[Array.IndexOf(fitScores, bestFitScore)].CloneDeepWithResults();
 
       double currentSelectionPressure = 0.0;
+
+      // Pre-fill all elite slots: populationNew[1..Elites-1] are Clone() objects with zero
+      // stats that the loop never overwrites, causing zero stats in population[] after the swap.
+      for (int e = 1; e < Elites; e++) {
+        populationNew[e] = (RPN<Symbol>)population[e].CloneDeepWithResults();
+        fitScoresNew[e] = fitScores[e];
+      }
+      populationNew[0] = (RPN<Symbol>)bestSolution.CloneDeepWithResults();
+      fitScoresNew[0] = bestFitScore;
 
       for (int g = 0; g < Generations && currentSelectionPressure < MaximumSelectionPressure; g++) // g = generation
       {
@@ -434,8 +464,12 @@ namespace PGP.Core {
         populationNew = tmpPopulation;
         fitScoresNew = tmpFitScores;
 
-        // keep elite (1) — also refresh fitScoresNew so next gen has no stale zeros
+        // keep all elite slots — also refresh fitScoresNew so next gen has no stale zeros
         Array.Copy(fitScores, fitScoresNew, PopulationSize);
+        for (int e = 1; e < Elites; e++) {
+          populationNew[e] = (RPN<Symbol>)population[Elites + e - 1].CloneDeepWithResults();
+          fitScoresNew[e] = fitScores[Elites + e - 1];
+        }
         populationNew[0] = (RPN<Symbol>)bestSolution.CloneDeepWithResults();
         fitScoresNew[0] = bestFitScore;
 
@@ -443,6 +477,11 @@ namespace PGP.Core {
 
         if (LogStatistics) Console.WriteLine($"Generation: {g:d4}, Evaluations: {generationalEvaluationCount:d4}, Selection Pressure: {currentSelectionPressure:f2}, Score: {bestFitScore:f12}");
       }
+
+      // Sync the final best solution into population[0] so that the public statistics
+      // properties always reflect the overall best found during the run.
+      population[0] = (RPN<Symbol>)bestSolution.CloneDeepWithResults();
+      fitScores[0] = bestFitScore;
     }
 
     #endregion Fit and Run

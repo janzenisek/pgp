@@ -70,7 +70,7 @@ namespace PGP.Runner {
 
       pgp.SelectedTerminals = [
         Terminal.Variable,
-      Terminal.Constant
+        Terminal.Constant
       ];
 
 

@@ -56,6 +56,7 @@ namespace PGP.Core {
         if (localEvaluationBuffer.Count > 0) {
           Console.WriteLine("\n!!! ERROR !!!\n");
           localEvaluationBuffer.Clear();
+          return double.NaN;
         }
         if (double.IsNaN(result) || double.IsInfinity(result) || double.IsNegativeInfinity(result)) {
           return double.NaN;
@@ -83,7 +84,7 @@ namespace PGP.Core {
 
       if (p.CompiledDelegate == null || !_delegateCache.ContainsKey(key)) {
         var compiled = CompileToDelegate(p, data.RowCount);
-        if (compiled == null) return t.Score.GetPessimal();
+        if (compiled == null) return double.NaN; // NaN signals rejection to the !IsNaN guard in the run loops
         _delegateCache[key] = compiled;
         p.CompiledDelegate = compiled;
       } else {
@@ -105,7 +106,7 @@ namespace PGP.Core {
         // Check for non-finite results and copy into program lists via span (no _version bump).
         Span<double> estSpan = CollectionsMarshal.AsSpan(p.EstimatedResults);
         for (int i = 0; i < rowCount; i++) {
-          if (!double.IsFinite(estBuffer[i])) return t.Score.GetPessimal();
+          if (!double.IsFinite(estBuffer[i])) return double.NaN; // NaN signals rejection; keeps p.NMSE/PearsonR/LD uncorrupted
           estSpan[i] = estBuffer[i];
           p.TrueResults[i] = data.Data[targetIdx * rowCount + i];
         }

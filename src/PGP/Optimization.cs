@@ -117,6 +117,9 @@ namespace PGP.Core {
         }
       }
 
+      // Re-evaluate with the final constants so that all stored metrics
+      // (PearsonR, NMSE, LD, TrueResults, EstimatedResults) are consistent.
+      pFit = pgp.Evaluate(pgp, p, task, data);
       return Tuple.Create(p, pFit);
     }
 
@@ -197,6 +200,9 @@ namespace PGP.Core {
         }
       }
 
+      // Re-evaluate with the final constants/coefficients so that all stored metrics
+      // (PearsonR, NMSE, LD, TrueResults, EstimatedResults) are consistent.
+      pFit = pgp.Evaluate(pgp, p, task, data);
       return Tuple.Create(p, pFit);
     }
 
