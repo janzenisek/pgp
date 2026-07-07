@@ -9,7 +9,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace PGP.Core {
+namespace PGP.Core.Operators {
   public static class Evaluation {
     // Cross-instance structural delegate cache (Cause 3 fix).
     // Key = GetStructuralKey(p, rowCount); value is reused by any program with the same topology.

@@ -1,4 +1,5 @@
-﻿using PGP.Data;
+﻿using PGP.Core.Operators;
+using PGP.Data;
 using PGP.Utils;
 using System.Collections.Concurrent;
 using System.Linq.Expressions;
@@ -56,7 +57,6 @@ namespace PGP.Core {
     public Task Task { get; set; }
     public DataSet DataSet { get; set; }
     public DataRecord DataRecord { get; set; }
-    public Store Store { get; set; }
 
     
     // GP Settings
@@ -94,7 +94,7 @@ namespace PGP.Core {
 
     // GP Operators
     public Func<PgpAlgorithm, RPN<Symbol>> Breed { get; set; } = Creation.BreedConstrained;
-    public Func<RPN<Symbol>[], Task, Tuple<RPN<Symbol>, int>> Select { get; set; } = Selection.TournamentSelection;
+    public Func<PgpAlgorithm, RPN<Symbol>[], Task, Tuple<RPN<Symbol>, int>> Select { get; set; } = Selection.TournamentSelection;
     public Func<PgpAlgorithm, RPN<Symbol>, RPN<Symbol>, RPN<Symbol>> Crossover { get; set; } = Crossing.Cross;
     public Func<PgpAlgorithm, RPN<Symbol>, RPN<Symbol>> Mutate { get; set; } = Mutation.MutateMultiCase;
     public List<Func<PgpAlgorithm, RPN<Symbol>, RPN<Symbol>>> Mutators { get; set; } = new List<Func<PgpAlgorithm, RPN<Symbol>, RPN<Symbol>>>();
@@ -158,9 +158,7 @@ namespace PGP.Core {
       MaximumSelectionPressure = maximumSelectionPressure;
       Elites = elites;
       SymbolCount = symbolCount;
-      NestingDepth = nestingDepth;
-
-      Selection.Rng = Rng;      
+      NestingDepth = nestingDepth;       
 
       UseParallelization = false;
       LogStatistics = false;
@@ -259,8 +257,8 @@ namespace PGP.Core {
           for (int i = range.Item1; i < range.Item2 && currentSelectionPressure < MaximumSelectionPressure;) {
 
             // select
-            var c1Idx = Select(population, Task).Item2;
-            var c2Idx = Select(population, Task).Item2;
+            var c1Idx = Select(this, population, Task).Item2;
+            var c2Idx = Select(this, population, Task).Item2;
 
             var c1 = population[c1Idx];
             var c2 = population[c2Idx];
@@ -408,8 +406,8 @@ namespace PGP.Core {
         do {
           //var c1Idx = SelectProportionalIdx(fitScoresList, sumFitScores, modelingTask);
           //var c2Idx = SelectProportionalIdx(fitScoresList, sumFitScores, modelingTask);
-          var c1Idx = Select(population, Task).Item2;
-          var c2Idx = Select(population, Task).Item2;
+          var c1Idx = Select(this, population, Task).Item2;
+          var c2Idx = Select(this, population, Task).Item2;
           var c1 = population[c1Idx];
           var c2 = population[c2Idx];
 

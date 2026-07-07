@@ -2,6 +2,7 @@
 using PGP.Utils;
 using PGP.Core;
 using System.Diagnostics;
+using PGP.Core.Operators;
 
 namespace PGP.Runner {
   public class Program {
@@ -25,7 +26,7 @@ namespace PGP.Runner {
       foreach (var s in dds) {
         var min = s.Value.Values.Min();
         var max = s.Value.Values.Max();
-        variableLimitDict.Add(s.Value.Name, Tuple.Create(min, max));
+        variableLimitDict.Add(s.Value.Name, Tuple.Create(min, max)); 
       }
 
 

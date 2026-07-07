@@ -5,7 +5,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace PGP.Core {
+namespace PGP.Core.Operators {
   public class Creation {
     public static Symbol CreateTerminal(PgpAlgorithm pgp, ref int c) {
       double rndD = pgp.Rng.NextDouble();

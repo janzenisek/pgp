@@ -3,7 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 
-namespace PGP.Core {
+namespace PGP.Core.Operators {
   public class Crossing {
 
     // Simple crossover: picks a random operator crosspoint in each parent and swaps

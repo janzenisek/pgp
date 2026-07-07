@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using System.Text;
 
-namespace PGP.Core {
+namespace PGP.Core.Operators {
   public class Mutation {
 
     public static RPN<Symbol> MutateReplaceSubtree(PgpAlgorithm pgp, RPN<Symbol> o) {

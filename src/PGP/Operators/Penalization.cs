@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using System.Text;
 
-namespace PGP.Core {
+namespace PGP.Core.Operators {
   public class Penalization {
 
     public double PenalizeOversize(PgpAlgorithm pgp, RPN<Symbol> o) {
