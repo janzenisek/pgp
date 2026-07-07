@@ -291,19 +291,23 @@ namespace PGP.Core {
               sizeDiffAfterMutation.Add(diff);
             }
 
+
             // simplify
             if(PerformSimplification)
               populationNew[i] = Simplify(populationNew[i]);
 
-            // evaluate
-            double f = Evaluate(this, populationNew[i], Task, DataRecord);
-            localEvaluationCount++;
 
+            // evaluate                        
+            double f = double.NaN;
             if(Optimizer != null) {
               var optimizedResult = Optimizer(this, populationNew[i], Task, DataRecord);
               populationNew[i] = optimizedResult.Item1;
               f = optimizedResult.Item2;
+            } else {
+              f = Evaluate(this, populationNew[i], Task, DataRecord);
             }
+            localEvaluationCount++;
+
 
             if (!double.IsNaN(f)) {
               //if (f > Math.Min(f1, f2)) { // OS              
