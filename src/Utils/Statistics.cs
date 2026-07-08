@@ -1,4 +1,6 @@
-﻿namespace PGP.Utils {
+﻿using System.Runtime.InteropServices;
+
+namespace PGP.Utils {
   public static class Statistics {
     public static int Max(int a, int b) {
       return a > b ? a : b;
@@ -154,9 +156,9 @@
       return ranks;
     }
 
-    public static double PearsonRFast(List<double> x, List<double> y) {
+    public static double PearsonR_Depr(List<double> x, List<double> y) {
       int n = x.Count;
-      if (n != y.Count || n == 0) return -1.0;
+      if (n != y.Count || n == 0) return 0.0;//return -1.0;
 
       double sx = 0.0, sy = 0.0;
       for (int i = 0; i < n; i++) {
@@ -177,28 +179,59 @@
       double den = Math.Sqrt(den1 * den2);
 
       if (den == 0 || double.IsNaN(den) || double.IsInfinity(den) || double.IsNaN(num) || double.IsInfinity(num)) {
-        return -1.0;
+        //return -1.0;
+        return 0.0;
       }
 
       return Math.Clamp(num / den, -1.0, 1.0);
     }
 
-    public static double PearsonR(IEnumerable<double> x, IEnumerable<double> y) {
-      // Delegate to PearsonRFast to ensure consistent formula:
-      // Covariance() uses sample (÷n-1) while StandardDeviation() uses population (÷n),
-      // mixing them would scale the result by n/(n-1) instead of yielding true Pearson R.
-      // Materialize only if the caller didn't already pass a List<double> (the common case).
-      return PearsonRFast(x as List<double> ?? x.ToList(), y as List<double> ?? y.ToList());
+    public static double PearsonR(List<double> x, List<double> y) {
+      int n = x.Count;
+
+      //if (x is null)
+      //  throw new ArgumentNullException(nameof(x));
+      //if (y is null)
+      //  throw new ArgumentNullException(nameof(y));
+      //if (n != y.Count)
+      //  throw new ArgumentException("Lists have to contain the same number of elements");
+      //if (n < 2)
+      //  return double.NaN;
+
+      ReadOnlySpan<double> xs = CollectionsMarshal.AsSpan(x);
+      ReadOnlySpan<double> ys = CollectionsMarshal.AsSpan(y);
+
+      double meanX = 0.0;
+      double meanY = 0.0;
+      double sumSqX = 0.0;
+      double sumSqY = 0.0;
+      double sumCo = 0.0;
+
+      for (int i = 0; i < n; i++) {
+        double xi = xs[i];
+        double yi = ys[i];
+
+        double dx = xi - meanX;
+        double dy = yi - meanY;
+
+        double invCount = 1.0 / (i + 1);
+
+        meanX += dx * invCount;
+        meanY += dy * invCount;
+
+        sumSqX += dx * (xi - meanX);
+        sumSqY += dy * (yi - meanY);
+        sumCo += dx * (yi - meanY);
+      }
+
+      if (sumSqX <= 0.0 || sumSqY <= 0.0)
+        return double.NaN;
+
+      double den = Math.Sqrt(sumSqX * sumSqY);
+      return Math.Clamp(sumCo / den, -1.0, 1.0);
     }
 
-    public static double Spearman(IEnumerable<double> x, IEnumerable<double> y) {
-      var xr = GetRanks(x);
-      var yr = GetRanks(y);
-
-      return Covariance(xr, yr) / (xr.StandardDeviation() * yr.StandardDeviation());
-    }
-
-    public static double NMSE(List<double> actual, List<double> predicted) {
+    public static double NMSE_Deprecated(List<double> actual, List<double> predicted) {
       int n = actual.Count;
       if (predicted.Count != n || n == 0) return double.NaN;
 
@@ -217,13 +250,122 @@
       return mse / var;
     }
 
+    public static double NMSE(List<double> actual, List<double> predicted) {
+      int n = actual.Count;
+
+      //if (actual is null)
+      //  throw new ArgumentNullException(nameof(actual));
+      //if (predicted is null)
+      //  throw new ArgumentNullException(nameof(predicted));
+      //if (n == 0 || predicted.Count != n)
+      //  return double.NaN;
+
+      ReadOnlySpan<double> a = CollectionsMarshal.AsSpan(actual);
+      ReadOnlySpan<double> p = CollectionsMarshal.AsSpan(predicted);
+
+      double sumActual = 0.0;
+      double sumActualSq = 0.0;
+      double sumErrorSq = 0.0;
+
+      for (int i = 0; i < n; i++) {
+        double ai = a[i];
+        double error = p[i] - ai;
+
+        sumActual += ai;
+        sumActualSq += ai * ai;
+        sumErrorSq += error * error;
+      }
+
+      double varianceNumerator = sumActualSq - (sumActual * sumActual / n);
+
+      if (varianceNumerator <= 0.0)
+        return double.NaN;
+
+      return sumErrorSq / varianceNumerator;
+    }
+
+    public static double NMSE_FastStable(List<double> actual, List<double> predicted) {
+      if (actual is null)
+        throw new ArgumentNullException(nameof(actual));
+
+      if (predicted is null)
+        throw new ArgumentNullException(nameof(predicted));
+
+      int n = actual.Count;
+
+      if (n == 0 || predicted.Count != n)
+        return double.NaN;
+
+      ReadOnlySpan<double> a = CollectionsMarshal.AsSpan(actual);
+      ReadOnlySpan<double> p = CollectionsMarshal.AsSpan(predicted);
+
+      double sumActual = 0.0;
+
+      for (int i = 0; i < n; i++)
+        sumActual += a[i];
+
+      double mean = sumActual / n;
+
+      double sumErrorSq = 0.0;
+      double sumDeviationSq = 0.0;
+
+      for (int i = 0; i < n; i++) {
+        double ai = a[i];
+        double error = p[i] - ai;
+        double deviation = ai - mean;
+
+        sumErrorSq += error * error;
+        sumDeviationSq += deviation * deviation;
+      }
+
+      if (sumDeviationSq <= 0.0)
+        return double.NaN;
+
+      return sumErrorSq / sumDeviationSq;
+    }
+
+    public static double RMSE(List<double> actual, List<double> predicted) {
+      int n = actual.Count;
+
+      if (n == 0 || predicted.Count != n)
+        return double.NaN;
+
+      double sse = 0.0;
+
+      for (int i = 0; i < n; i++) {
+        double e = predicted[i] - actual[i];
+        sse += e * e;
+      }
+
+      return Math.Sqrt(sse / n);
+    }
+
+    public static double RMSE_Fast(List<double> actual, List<double> predicted) {
+      int n = actual.Count;
+
+      if (n == 0 || predicted.Count != n)
+        return double.NaN;
+
+      ReadOnlySpan<double> a = CollectionsMarshal.AsSpan(actual);
+      ReadOnlySpan<double> p = CollectionsMarshal.AsSpan(predicted);
+
+      double sse = 0.0;
+
+      for (int i = 0; i < n; i++) {
+        double e = p[i] - a[i];
+        sse += e * e;
+      }
+
+      return Math.Sqrt(sse / n);
+    }
+
     public static double MRE(List<double> actual, List<double> predicted) {
       int n = actual.Count;
       if (predicted.Count != n || n == 0) return double.NaN;
       
       double mre = 0.0;
       for (int i = 0; i < n; i++) {
-        mre += Math.Abs(predicted[i] - actual[i]);
+        mre += Math.Abs(actual[i] - predicted[i]) / Math.Abs(actual[i]);
       }
       return mre / n;
     }
@@ -234,9 +376,16 @@
 
       double mae = 0.0;
       for (int i = 0; i < n; i++) {
-        mae += predicted[i] - actual[i];
+        mae += Math.Abs(actual[i] - predicted[i]);
       }
       return mae / n;
+    }
+
+    public static double Spearman(IEnumerable<double> x, IEnumerable<double> y) {
+      var xr = GetRanks(x);
+      var yr = GetRanks(y);
+
+      return Covariance(xr, yr) / (xr.StandardDeviation() * yr.StandardDeviation());
     }
 
     public static long GetBinomealCoefficient(long N, long K) {
@@ -256,8 +405,6 @@
       }
       return r;
     }
-
-
 
     // Feature scaling (https://en.wikipedia.org/wiki/Feature_scaling)
 

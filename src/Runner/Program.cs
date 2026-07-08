@@ -111,6 +111,8 @@ namespace PGP.Runner {
 
 
       // --- print results/stats
+      pgp.ComputeScores();
+
       Console.WriteLine();
       Console.WriteLine($"Evaluations:        {pgp.EvaluationCount}");
       Console.WriteLine($"Runtime:            {(sw.ElapsedMilliseconds / 1000.0):f8} seconds");
@@ -120,6 +122,7 @@ namespace PGP.Runner {
       Console.WriteLine($"Best Program INF:   {pgp.BestProgram}");
       Console.WriteLine();
       Console.WriteLine($"Best NMSE:          {pgp.BestProgramNMSE}");
+      Console.WriteLine($"Best RMSE:          {pgp.BestProgramRMSE}");
       Console.WriteLine($"Best Pearson R:     {pgp.BestProgramPearsonR}");
       Console.WriteLine($"Best Pearson R2:    {pgp.BestProgramPearsonR2}");
       Console.WriteLine($"Best LD:            {pgp.BestProgramLD}");

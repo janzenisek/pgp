@@ -66,20 +66,8 @@ namespace PGP.Core.Operators {
         program.TrueResults[i] = data.Data[targetIdx * data.RowCount + i]; // not necessary to do this in every evaluation, but it is more convenient to have the true values stored in the program for later use (e.g. for statistics)
         program.EstimatedResults[i] = result;
       }
-
-      program.PearsonR = PearsonR.ComputeScore(program);
-      program.NMSE = NMSE.ComputeScore(program);
-      program.LD = LD.ComputeScore(program);
-
-      // The three metrics above already populate program.{PearsonR,NMSE,LD} — every metric
-      // Task currently supports (see Task's constructor) — so reuse the cached value for the
-      // active metric instead of paying for a second full pass via Score.Compute.
-      return task.Metric switch {
-        Metric.PearsonR => program.PearsonR,
-        Metric.NMSE => program.NMSE,
-        Metric.LD => program.LD,
-        _ => task.Score.Compute(program)
-      };
+      program.Score = task.Score.Compute(program);
+      return program.Score;
     }
 
     public static double EvaluateProgram(PgpAlgorithm pgp, RPN<Symbol> p, Task t, DataRecord data) {
@@ -126,17 +114,8 @@ namespace PGP.Core.Operators {
         ArrayPool<double>.Shared.Return(estBuffer);
       }
 
-      p.PearsonR = PearsonR.ComputeScore(p);
-      p.NMSE = NMSE.ComputeScore(p);
-      p.LD = LD.ComputeScore(p);
-
-      // Same rationale as EvaluateStack: avoid recomputing the active metric a second time.
-      return t.Metric switch {
-        Metric.PearsonR => p.PearsonR,
-        Metric.NMSE => p.NMSE,
-        Metric.LD => p.LD,
-        _ => t.Score.Compute(p)
-      };
+      p.Score = t.Score.Compute(p);
+      return p.Score;
     }
 
 

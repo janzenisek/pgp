@@ -93,7 +93,7 @@ namespace PGP.Core {
 
     // GP Operators
     public Func<PgpAlgorithm, RPN<Symbol>> Breed { get; set; } = Creation.BreedConstrained;
-    public Func<PgpAlgorithm, RPN<Symbol>[], Task, Tuple<RPN<Symbol>, int>> Select { get; set; } = Selection.TournamentSelection;
+    public Func<PgpAlgorithm, RPN<Symbol>[], Task, int> Select { get; set; } = Selection.TournamentSelection;
     public Func<PgpAlgorithm, RPN<Symbol>, RPN<Symbol>, RPN<Symbol>> Crossover { get; set; } = Crossing.Cross;
     public Func<PgpAlgorithm, RPN<Symbol>, RPN<Symbol>> Mutate { get; set; } = Mutation.MutateMultiCase;
     public List<Func<PgpAlgorithm, RPN<Symbol>, RPN<Symbol>>> Mutators { get; set; } = new List<Func<PgpAlgorithm, RPN<Symbol>, RPN<Symbol>>>();
@@ -123,6 +123,7 @@ namespace PGP.Core {
     public double BestProgramPearsonR => population.OrderBy(x => OrderByScore(x, Task.Metric)).First().PearsonR;
     public double BestProgramPearsonR2 => population.OrderBy(x => OrderByScore(x, Task.Metric)).First().PearsonR2;
     public double BestProgramNMSE => population.OrderBy(x => OrderByScore(x, Task.Metric)).First().NMSE;
+    public double BestProgramRMSE => population.OrderBy(x => OrderByScore(x, Task.Metric)).First().RMSE;
     public double BestProgramLD => population.OrderBy(x => OrderByScore(x, Task.Metric)).First().LD;
     public double MeanPearsonR => population.Average(x => x.PearsonR);
     public double MedianPearsonR => population.Select(x => x.PearsonR).Median();
@@ -136,8 +137,9 @@ namespace PGP.Core {
     public void ComputeScores() {
       for(int i = 0; i < population.Length; i++) {
         var p = population[i];
-        p.PearsonR = Statistics.PearsonRFast(p.TrueResults, p.EstimatedResults);
+        p.PearsonR = Statistics.PearsonR(p.TrueResults, p.EstimatedResults);
         p.PearsonR2 = p.PearsonR * p.PearsonR;
+        p.RMSE = Statistics.RMSE(p.TrueResults, p.EstimatedResults);
         p.NMSE = Statistics.NMSE(p.TrueResults, p.EstimatedResults);
         p.MRE = Statistics.MRE(p.TrueResults, p.EstimatedResults);
         p.MAE = Statistics.MAE(p.TrueResults, p.EstimatedResults);
@@ -150,6 +152,7 @@ namespace PGP.Core {
         Metric.PearsonR => 1.0 - Math.Abs(p.PearsonR), 
         Metric.PearsonR2 => 1.0 - p.PearsonR2,
         Metric.NMSE => p.NMSE,
+        Metric.RMSE => p.RMSE,
         Metric.MRE => p.MRE,
         Metric.MAE => p.MAE,
         Metric.LD => p.LD,
@@ -271,8 +274,8 @@ namespace PGP.Core {
             for (int i = range.Item1; i < range.Item2 && currentSelectionPressure < MaximumSelectionPressure;) {
 
             // select
-            var c1Idx = Select(this, population, Task).Item2;
-            var c2Idx = Select(this, population, Task).Item2;
+            var c1Idx = Select(this, population, Task);
+            var c2Idx = Select(this, population, Task);
 
             var c1 = population[c1Idx];
             var c2 = population[c2Idx];
@@ -367,16 +370,8 @@ namespace PGP.Core {
 
         EvaluationCount += generationalEvaluationCount;
 
-        if (LogStatistics) {
-          bestSolution.PearsonR = Statistics.PearsonRFast(bestSolution.TrueResults, bestSolution.EstimatedResults);
-          bestSolution.PearsonR2 = bestSolution.PearsonR * bestSolution.PearsonR;
-          bestSolution.NMSE = Statistics.NMSE(bestSolution.TrueResults, bestSolution.EstimatedResults);
-          bestSolution.LD = LD.ComputeScore(bestSolution);
-
-          //Console.WriteLine($"Gen: {g + 1:d4}, PR: {bestSolution.PearsonR:f4}, NMSE: {bestSolution.NMSE:f4}, LD: {bestSolution.LD:f2}, MeanSize: {population.Select(x => x.Count).Average():f2}, MedSize: {population.Select(x => x.Count).Median():f2}, AfterCross: {sizeDiffAfterCrossover.Mean():f2}, AfterMut: {sizeDiffAfterMutation.Mean():f2}");
-          Console.WriteLine($"Gen: {g + 1:d4}, PR: {bestSolution.PearsonR:f4}, PR2: {bestSolution.PearsonR2:f4}, NMSE: {bestSolution.NMSE:f4}, LD: {bestSolution.LD:f2}, MeanSize: {population.Select(x => x.Count).Average():f2}, MedSize: {population.Select(x => x.Count).Median():f2}");
-          //sizeDiffAfterCrossover.Clear();
-          //sizeDiffAfterMutation.Clear();
+        if (LogStatistics) {          
+          Console.WriteLine($"Gen: {g + 1:d4}, Score ({Task.Score.Name}): {bestSolution.Score:f4}, PR: {bestSolution.PearsonR:f4}, PR2: {bestSolution.PearsonR2:f4}, NMSE: {bestSolution.NMSE:f4}, LD: {bestSolution.LD:f2}, MeanSize: {population.Select(x => x.Count).Average():f2}, MedSize: {population.Select(x => x.Count).Median():f2}");
         }
       }
       
@@ -387,7 +382,6 @@ namespace PGP.Core {
 
       if (LogStatistics) {
         Console.WriteLine();
-        Console.WriteLine($"Pearson R: {bestSolution.PearsonR}, Pearson R2: {bestSolution.PearsonR2}, NMSE: {bestSolution.NMSE}, LD: {bestSolution.LD}");
         Console.WriteLine($"Crossover Failed: {crossoverFailed}");
       }
     }
@@ -426,8 +420,8 @@ namespace PGP.Core {
         do {
           //var c1Idx = SelectProportionalIdx(fitScoresList, sumFitScores, modelingTask);
           //var c2Idx = SelectProportionalIdx(fitScoresList, sumFitScores, modelingTask);
-          var c1Idx = Select(this, population, Task).Item2;
-          var c2Idx = Select(this, population, Task).Item2;
+          var c1Idx = Select(this, population, Task);
+          var c2Idx = Select(this, population, Task);
           var c1 = population[c1Idx];
           var c2 = population[c2Idx];
 
@@ -834,6 +828,8 @@ namespace PGP.Core {
         Metric.PearsonR => population.Select(x => x.PearsonR).ToArray(),
         Metric.PearsonR2 => population.Select(x => x.PearsonR2).ToArray(),
         Metric.NMSE => population.Select(x => x.NMSE).ToArray(),
+        Metric.RMSE => population.Select(x => x.RMSE).ToArray(),
+        Metric.MAE => population.Select(x => x.MAE).ToArray(),
         Metric.MRE => population.Select(x => x.MRE).ToArray(),
         Metric.LD => population.Select(x => x.LD).ToArray(),
         _ => throw new ArgumentException("Unsupported metric: " + metric)
@@ -842,7 +838,9 @@ namespace PGP.Core {
 
     private double GetScore(RPN<Symbol> p, Metric metric) => metric switch {
       Metric.PearsonR => p.PearsonR,
+      Metric.PearsonR2 => p.PearsonR2,
       Metric.NMSE => p.NMSE,
+      Metric.RMSE => p.RMSE,
       Metric.MRE => p.MRE,
       Metric.LD => p.LD,
       _ => throw new ArgumentException("Unsupported metric: " + metric)

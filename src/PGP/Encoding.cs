@@ -7,6 +7,7 @@ namespace PGP.Core {
     public double PearsonR { get; set; } = double.NaN;
     public double PearsonR2 { get; set; } = double.NaN;
     public double NMSE { get; set; } = double.NaN;
+    public double RMSE { get; set; } = double.NaN;
     public double MAE { get; set; } = double.NaN;
     public double MRE { get; set; } = double.NaN;
     public double LD { get; set; } = double.NaN; // description length = L(H) + L(D|H) = length of the expression + length of the data given the expression, where the latter is estimated by NMSE
@@ -54,6 +55,7 @@ namespace PGP.Core {
       PearsonR = rpn.PearsonR;
       PearsonR2 = rpn.PearsonR2;
       NMSE = rpn.NMSE;
+      RMSE = rpn.RMSE;
       MAE = rpn.MAE;
       MRE = rpn.MRE;
       LD = rpn.LD;
@@ -69,7 +71,7 @@ namespace PGP.Core {
       TrueResults = new List<double>(new double[evaluationCapacity]);
     }
 
-    public RPN(IEnumerable<T> items, int capacity, int evaluationCapacity, List<double> estimatedResults, List<double> trueResults, double score, double pearsonR, double pearsonR2, double nmse, double mae, double mre, double ld) : base(items) {
+    public RPN(IEnumerable<T> items, int capacity, int evaluationCapacity, List<double> estimatedResults, List<double> trueResults, double score, double pearsonR, double pearsonR2, double nmse, double rmse, double mae, double mre, double ld) : base(items) {
       this.Capacity = capacity;
       this.EvaluationCapacity = evaluationCapacity;
       EstimatedResults = new List<double>(estimatedResults);
@@ -78,6 +80,7 @@ namespace PGP.Core {
       PearsonR = pearsonR;
       PearsonR2 = pearsonR2;
       NMSE = nmse;
+      RMSE = rmse;
       MAE = mae;
       MRE = mre;
       LD = ld;
@@ -114,7 +117,7 @@ namespace PGP.Core {
       var arr = new T[this.Count];
       for (int i = 0; i < this.Count; i++)
         arr[i] = (this[i] is Symbol s) ? (T)(object)s.Clone() : this[i];
-      var clone = new RPN<T>(arr, this.Capacity, this.EvaluationCapacity, this.EstimatedResults, this.TrueResults, Score, PearsonR, PearsonR2, NMSE, MAE, MRE, LD);
+      var clone = new RPN<T>(arr, this.Capacity, this.EvaluationCapacity, this.EstimatedResults, this.TrueResults, Score, PearsonR, PearsonR2, NMSE, RMSE, MAE, MRE, LD);
       clone.CompiledDelegate = CompiledDelegate;
       return clone;
     }

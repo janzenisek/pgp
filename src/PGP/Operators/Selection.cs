@@ -14,31 +14,49 @@ namespace PGP.Core.Operators {
     public static double fitScoreSum = 0;
     public static List<double> fitScores = new List<double>();
 
-    public static Tuple<RPN<Symbol>, int> RandomSelection(PgpAlgorithm pgp, RPN<Symbol>[] population, Task task) {
-      var index = pgp.Rng.Next(population.Length);
-      return Tuple.Create(population[index], index);
+    public static int RandomSelection(PgpAlgorithm pgp, RPN<Symbol>[] population, Task task) {
+      return pgp.Rng.Next(population.Length);      
     }
 
-    public static Tuple<RPN<Symbol>, int> ProportionalSelection(PgpAlgorithm pgp, RPN<Symbol>[] population, Task task) {
+    public static int ProportionalSelection(PgpAlgorithm pgp, RPN<Symbol>[] population, Task task) {
       double rnd = pgp.Rng.NextDouble() * fitScoreSum;
       double cumulative = 0.0;
       for (int i = 0; i < fitScores.Count; i++) {
         cumulative += fitScores[i];
-        if (rnd < cumulative) return Tuple.Create(population[i], i);
+        if (rnd < cumulative) return i;
       }
-      return Tuple.Create(population[fitScores.Count - 1], fitScores.Count - 1); // should not happen, but just in case of rounding errors
+      return fitScores.Count - 1; // should not happen, but just in case of rounding errors
     }
     
-    public static Tuple<RPN<Symbol>, int> TournamentSelection(PgpAlgorithm pgp, RPN<Symbol>[] population, Task task) {      
-      var tournament = new List<Tuple<RPN<Symbol>, int, double>>();
+    public static int TournamentSelection(PgpAlgorithm pgp, RPN<Symbol>[] population, Task task) {     
+      
+      // setup tournament group
+      var tournament = new int[pgp.TournamentSize];
       for (int j = 0; j < pgp.TournamentSize; j++) {
-        int idx = pgp.Rng.Next(population.Length);
-        tournament.Add(Tuple.Create(population[idx], idx, fitScores[idx]));
-      }      
-      var best = tournament.OrderBy(p => p.Item3).First();
+        tournament[j] = pgp.Rng.Next(population.Length);         
+      }
 
-      return Tuple.Create(best.Item1, best.Item2);
-    } 
+      // find tournament winner
+      int best = tournament[0];
+      for(int i = 1; i < tournament.Length; i++) { 
+        // v1
+        //if(task.Score.IsBetter(population[tournament[i]].Score, population[best].Score)) {
+        //  best = tournament[i];
+        //}
+
+        //v2
+        if (task.OptimizationDirection == OptimizationDirection.Maximize) {
+          if (population[tournament[i]].Score > population[best].Score) {
+            best = tournament[i];
+          }
+        } else {
+          if (population[tournament[i]].Score < population[best].Score) {
+            best = tournament[i];
+          }
+        }
+      }      
+      return best;
+    }
 
   }
 }

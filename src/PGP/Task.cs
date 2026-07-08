@@ -11,9 +11,10 @@ namespace PGP.Core {
     PearsonR = 0,
     PearsonR2 = 1,
     NMSE = 2,
-    MRE = 3,
-    MAE = 4,
-    LD = 5
+    RMSE = 3,
+    MRE = 4,
+    MAE = 5,
+    LD = 6
   }
 
   public enum OptimizationDirection {
@@ -55,7 +56,7 @@ namespace PGP.Core {
     }
 
     public double GetPessimal() {
-      return -1.0;
+      return 0.0; // 0.0 or -1.0
     }
 
     public bool IsBetter(double score1, double score2) {
@@ -71,7 +72,7 @@ namespace PGP.Core {
     }    
 
     public static double ComputeScore(RPN<Symbol> p) {
-      double r = Statistics.PearsonRFast(p.TrueResults, p.EstimatedResults);
+      double r = Statistics.PearsonR(p.TrueResults, p.EstimatedResults);
       p.PearsonR = r;
       return r;
     }
@@ -115,7 +116,7 @@ namespace PGP.Core {
     }
 
     public static double ComputeScore(RPN<Symbol> p) {
-      double r = Statistics.PearsonRFast(p.TrueResults, p.EstimatedResults);
+      double r = Statistics.PearsonR(p.TrueResults, p.EstimatedResults);
       p.PearsonR2 = r * r;
       return p.PearsonR2;
     }
@@ -168,6 +169,49 @@ namespace PGP.Core {
     }
   }
 
+  public class RMSE : IScore {
+    public string Name { get => "RMSE"; }
+    public Metric Metric { get => Metric.RMSE; }
+    public OptimizationDirection Direction { get => OptimizationDirection.Minimize; }
+
+    public double GetMaxValue() {
+      return double.MaxValue;
+    }
+
+    public double GetMinValue() {
+      return 0.0;
+    }
+
+    public double GetOptimum() {
+      return 0.0;
+    }
+
+    public double GetPessimal() {
+      return double.MaxValue;
+    }
+
+    public bool IsBetter(double score1, double score2) {
+      return score1 < score2;
+    }
+
+    public double GetScoreSum(double[] scores) {
+      return scores.Select(s => 1.0 / (1.0 + s)).Sum();
+    }
+
+    public double GetScoreCummulative(double score) {
+      return 1.0 / (1.0 + score);
+    }
+
+    public static double ComputeScore(RPN<Symbol> p) {
+      p.RMSE = Statistics.RMSE(p.TrueResults, p.EstimatedResults);
+      return p.RMSE;
+    }
+
+    public double Compute(RPN<Symbol> p) {
+      return ComputeScore(p);
+    }
+  }
+
   public class MRE : IScore {
     public string Name { get => "MRE"; }
     public Metric Metric { get => Metric.MRE; }
@@ -211,7 +255,6 @@ namespace PGP.Core {
     }
   }
 
-
   public class MAE : IScore {
     public string Name { get => "MAE"; }
     public Metric Metric { get => Metric.MAE; }
@@ -254,7 +297,6 @@ namespace PGP.Core {
       return ComputeScore(p);
     }
   }
-
 
   public class LD : IScore {
     public string Name { get => "LD"; }
@@ -417,8 +459,20 @@ namespace PGP.Core {
         case Metric.PearsonR:
           Score = new PearsonR();
           break;
+        case Metric.PearsonR2:
+          Score = new PearsonR2();
+          break;
         case Metric.NMSE:
           Score = new NMSE();
+          break;
+        case Metric.RMSE:
+          Score = new RMSE();
+          break;
+        case Metric.MRE:
+          Score = new MRE();
+          break;
+        case Metric.MAE:
+          Score = new MAE();
           break;
         case Metric.LD:
           Score = new LD();
