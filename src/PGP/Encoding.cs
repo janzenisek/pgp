@@ -3,13 +3,13 @@
 namespace PGP.Core {
   public class RPN<T> : List<T>, ICloneable {
 
-    public double Score { get; set; }
-    public double PearsonR { get; set; }
-    public double PearsonR2 { get; set; }
-    public double NMSE { get; set; }
-    public double MAE { get; set; }
-    public double MRE { get; set; }
-    public double LD { get; set; } // description length = L(H) + L(D|H) = length of the expression + length of the data given the expression, where the latter is estimated by NMSE
+    public double Score { get; set; } = double.NaN;
+    public double PearsonR { get; set; } = double.NaN;
+    public double PearsonR2 { get; set; } = double.NaN;
+    public double NMSE { get; set; } = double.NaN;
+    public double MAE { get; set; } = double.NaN;
+    public double MRE { get; set; } = double.NaN;
+    public double LD { get; set; } = double.NaN; // description length = L(H) + L(D|H) = length of the expression + length of the data given the expression, where the latter is estimated by NMSE
 
     public int EvaluationCapacity { get; set; }
 
@@ -50,7 +50,9 @@ namespace PGP.Core {
       this.EvaluationCapacity = rpn.EvaluationCapacity;
       EstimatedResults = new List<double>(rpn.EstimatedResults);
       TrueResults = new List<double>(rpn.TrueResults);
+      Score = rpn.Score;
       PearsonR = rpn.PearsonR;
+      PearsonR2 = rpn.PearsonR2;
       NMSE = rpn.NMSE;
       MAE = rpn.MAE;
       MRE = rpn.MRE;
@@ -67,12 +69,14 @@ namespace PGP.Core {
       TrueResults = new List<double>(new double[evaluationCapacity]);
     }
 
-    public RPN(IEnumerable<T> items, int capacity, int evaluationCapacity, List<double> estimatedResults, List<double> trueResults, double pearsonR, double nmse, double mae, double mre, double ld) : base(items) {
+    public RPN(IEnumerable<T> items, int capacity, int evaluationCapacity, List<double> estimatedResults, List<double> trueResults, double score, double pearsonR, double pearsonR2, double nmse, double mae, double mre, double ld) : base(items) {
       this.Capacity = capacity;
       this.EvaluationCapacity = evaluationCapacity;
       EstimatedResults = new List<double>(estimatedResults);
       TrueResults = new List<double>(trueResults);
+      Score = score;
       PearsonR = pearsonR;
+      PearsonR2 = pearsonR2;
       NMSE = nmse;
       MAE = mae;
       MRE = mre;
@@ -110,7 +114,7 @@ namespace PGP.Core {
       var arr = new T[this.Count];
       for (int i = 0; i < this.Count; i++)
         arr[i] = (this[i] is Symbol s) ? (T)(object)s.Clone() : this[i];
-      var clone = new RPN<T>(arr, this.Capacity, this.EvaluationCapacity, this.EstimatedResults, this.TrueResults, PearsonR, NMSE, MAE, MRE, LD);
+      var clone = new RPN<T>(arr, this.Capacity, this.EvaluationCapacity, this.EstimatedResults, this.TrueResults, Score, PearsonR, PearsonR2, NMSE, MAE, MRE, LD);
       clone.CompiledDelegate = CompiledDelegate;
       return clone;
     }

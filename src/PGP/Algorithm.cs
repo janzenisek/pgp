@@ -42,7 +42,6 @@ namespace PGP.Core {
     private FastRandom seedRng;
     private ThreadLocal<FastRandom> rng;
     public FastRandom Rng => rng.Value;
-    private Stack<double> evaluationBuffer;
     private RPN<Symbol>[] population;
 
     private object locker;
@@ -109,11 +108,12 @@ namespace PGP.Core {
     public int OptimizationIterations { get; set; } = 10;
     public bool PerformSimplification { get; set; } = false;
     public bool PerformPenalization { get; set; } = false;
-    public bool ComputeScores { get; set; } = false;
+    public bool ComputeAllScores { get; set; } = false;
 
 
     // Statistics
     public double MaxPearsonR => population.Max(x => x.PearsonR);
+    public double MaxPearsonR2 => population.Max(x => x.PearsonR2);
     public double MinMAE => population.Min(x => x.MAE);
     public double MinNMSE => population.Min(x => x.NMSE);
     public double MinLength => population.Min(x => x.Count);
@@ -121,21 +121,37 @@ namespace PGP.Core {
     public string BestProgram => population.OrderBy(x => OrderByScore(x, Task.Metric)).First().ToInfixString();
     public string BestProgramRPN => population.OrderBy(x => OrderByScore(x, Task.Metric)).First().ToString();
     public double BestProgramPearsonR => population.OrderBy(x => OrderByScore(x, Task.Metric)).First().PearsonR;
+    public double BestProgramPearsonR2 => population.OrderBy(x => OrderByScore(x, Task.Metric)).First().PearsonR2;
     public double BestProgramNMSE => population.OrderBy(x => OrderByScore(x, Task.Metric)).First().NMSE;
     public double BestProgramLD => population.OrderBy(x => OrderByScore(x, Task.Metric)).First().LD;
     public double MeanPearsonR => population.Average(x => x.PearsonR);
     public double MedianPearsonR => population.Select(x => x.PearsonR).Median();
+    public double MeanPearsonR2 => population.Average(x => x.PearsonR2);  
+    public double MedianPearsonR2 => population.Select(x => x.PearsonR2).Median();
     public double MeanLength => population.Average(x => x.Count);
     public double MedianLength => population.Select(x => x.Count).Median();
     public double MeanLD => population.Average(x => x.LD);
     public double MedianLD => population.Select(x => x.LD).Median();
+    
+    public void ComputeScores() {
+      for(int i = 0; i < population.Length; i++) {
+        var p = population[i];
+        p.PearsonR = Statistics.PearsonRFast(p.TrueResults, p.EstimatedResults);
+        p.PearsonR2 = p.PearsonR * p.PearsonR;
+        p.NMSE = Statistics.NMSE(p.TrueResults, p.EstimatedResults);
+        p.MRE = Statistics.MRE(p.TrueResults, p.EstimatedResults);
+        p.MAE = Statistics.MAE(p.TrueResults, p.EstimatedResults);
+        p.LD = LD.ComputeScore(p);
+      }
+    }
 
     private double OrderByScore(RPN<Symbol> p, Metric m = Metric.NMSE) { 
       return m switch {
-        Metric.PearsonR => 1.0 - p.PearsonR,
+        Metric.PearsonR => 1.0 - Math.Abs(p.PearsonR), 
         Metric.PearsonR2 => 1.0 - p.PearsonR2,
         Metric.NMSE => p.NMSE,
         Metric.MRE => p.MRE,
+        Metric.MAE => p.MAE,
         Metric.LD => p.LD,
         _ => throw new ArgumentException("Unsupported metric")
       };
@@ -145,7 +161,6 @@ namespace PGP.Core {
       int generations = 1000, int populationSize = 1000, int symbolCount = 50, int nestingDepth = 10, double crossoverRate = 1.0, double mutationRate = 0.25, double maximumSelectionPressure = 200, int elites = 1) {
       locker = new object();
       bestSolutionLocker = new object();
-      evaluationBuffer = new Stack<double>(symbolCount * 2);
 
 
       seedRng = randomNumberGenerator;
@@ -224,8 +239,8 @@ namespace PGP.Core {
       int crossoverFailed = 0;
 
       // tmp stats
-      var sizeDiffAfterCrossover = new List<double>();
-      var sizeDiffAfterMutation = new List<double>();
+      //var sizeDiffAfterCrossover = new List<double>();
+      //var sizeDiffAfterMutation = new List<double>();
 
       // Pre-fill all elite slots: populationNew[1..Elites-1] are Clone() objects with zero
       // stats that the loop never overwrites. After the first swap those zeros end up in
@@ -252,9 +267,8 @@ namespace PGP.Core {
         Parallel.ForEach(rangePartitioner,
           () => 0,
           (range, state, localEvaluationCount) =>
-        {
-          var localEvaluationBuffer = new Stack<double>(SymbolCount * 2);
-          for (int i = range.Item1; i < range.Item2 && currentSelectionPressure < MaximumSelectionPressure;) {
+          {
+            for (int i = range.Item1; i < range.Item2 && currentSelectionPressure < MaximumSelectionPressure;) {
 
             // select
             var c1Idx = Select(this, population, Task).Item2;
@@ -268,8 +282,8 @@ namespace PGP.Core {
             // cross
             if (Rng.NextDouble() < CrossoverRate) {
               RPN<Symbol> offspring = Crossover(this, c1, c2);              
-              var diff = offspring.Count - (c1.Count + c2.Count) / 2.0;
-              sizeDiffAfterCrossover.Add(diff);
+              //var diff = offspring.Count - (c1.Count + c2.Count) / 2.0;
+              //sizeDiffAfterCrossover.Add(diff);
               if (offspring == null) {
                 offspring = (RPN<Symbol>)c1.CloneDeep(); // safe fallback: use parent
                 Interlocked.Increment(ref crossoverFailed);
@@ -287,8 +301,8 @@ namespace PGP.Core {
                 populationNew[i] = Mutate(this, populationNew[i]);
               }
                           
-              var diff = populationNew[i].Count - population[i].Count;
-              sizeDiffAfterMutation.Add(diff);
+              //var diff = populationNew[i].Count - population[i].Count;
+              //sizeDiffAfterMutation.Add(diff);
             }
 
 
@@ -355,12 +369,14 @@ namespace PGP.Core {
 
         if (LogStatistics) {
           bestSolution.PearsonR = Statistics.PearsonRFast(bestSolution.TrueResults, bestSolution.EstimatedResults);
+          bestSolution.PearsonR2 = bestSolution.PearsonR * bestSolution.PearsonR;
           bestSolution.NMSE = Statistics.NMSE(bestSolution.TrueResults, bestSolution.EstimatedResults);
           bestSolution.LD = LD.ComputeScore(bestSolution);
 
-          Console.WriteLine($"Gen: {g + 1:d4}, PR: {bestSolution.PearsonR:f4}, NMSE: {bestSolution.NMSE:f4}, LD: {bestSolution.LD:f2}, MeanSize: {population.Select(x => x.Count).Average():f2}, MedSize: {population.Select(x => x.Count).Median():f2}, AfterCross: {sizeDiffAfterCrossover.Mean():f2}, AfterMut: {sizeDiffAfterMutation.Mean():f2}");
-          sizeDiffAfterCrossover.Clear();
-          sizeDiffAfterMutation.Clear();
+          //Console.WriteLine($"Gen: {g + 1:d4}, PR: {bestSolution.PearsonR:f4}, NMSE: {bestSolution.NMSE:f4}, LD: {bestSolution.LD:f2}, MeanSize: {population.Select(x => x.Count).Average():f2}, MedSize: {population.Select(x => x.Count).Median():f2}, AfterCross: {sizeDiffAfterCrossover.Mean():f2}, AfterMut: {sizeDiffAfterMutation.Mean():f2}");
+          Console.WriteLine($"Gen: {g + 1:d4}, PR: {bestSolution.PearsonR:f4}, PR2: {bestSolution.PearsonR2:f4}, NMSE: {bestSolution.NMSE:f4}, LD: {bestSolution.LD:f2}, MeanSize: {population.Select(x => x.Count).Average():f2}, MedSize: {population.Select(x => x.Count).Median():f2}");
+          //sizeDiffAfterCrossover.Clear();
+          //sizeDiffAfterMutation.Clear();
         }
       }
       
@@ -371,7 +387,7 @@ namespace PGP.Core {
 
       if (LogStatistics) {
         Console.WriteLine();
-        Console.WriteLine($"Pearson R: {bestSolution.PearsonR}, NMSE: {bestSolution.NMSE}, LD: {bestSolution.LD}");
+        Console.WriteLine($"Pearson R: {bestSolution.PearsonR}, Pearson R2: {bestSolution.PearsonR2}, NMSE: {bestSolution.NMSE}, LD: {bestSolution.LD}");
         Console.WriteLine($"Crossover Failed: {crossoverFailed}");
       }
     }

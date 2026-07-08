@@ -71,7 +71,15 @@ namespace PGP.Core.Operators {
       program.NMSE = NMSE.ComputeScore(program);
       program.LD = LD.ComputeScore(program);
 
-      return task.Score.Compute(program);
+      // The three metrics above already populate program.{PearsonR,NMSE,LD} — every metric
+      // Task currently supports (see Task's constructor) — so reuse the cached value for the
+      // active metric instead of paying for a second full pass via Score.Compute.
+      return task.Metric switch {
+        Metric.PearsonR => program.PearsonR,
+        Metric.NMSE => program.NMSE,
+        Metric.LD => program.LD,
+        _ => task.Score.Compute(program)
+      };
     }
 
     public static double EvaluateProgram(PgpAlgorithm pgp, RPN<Symbol> p, Task t, DataRecord data) {
@@ -80,16 +88,20 @@ namespace PGP.Core.Operators {
       //     via the paramValues array, so the same delegate is valid for any numeric values.
       // --- Cause 1 fix: the row-loop runs *inside* the compiled delegate; only one call needed. ---
 
-      string key = GetStructuralKey(p, data.RowCount);
-
-      if (p.CompiledDelegate == null || !_delegateCache.ContainsKey(key)) {
-        var compiled = CompileToDelegate(p, data.RowCount);
-        if (compiled == null) return double.NaN; // NaN signals rejection to the !IsNaN guard in the run loops
-        _delegateCache[key] = compiled;
-        p.CompiledDelegate = compiled;
-      } else {
-        // Reuse cached cross-instance delegate on this program instance
-        p.CompiledDelegate = _delegateCache[key];
+      // Structure (and therefore the compiled delegate) stays the same across repeated
+      // evaluations of this instance — e.g. every +h/-h probe inside Optimization's gradient
+      // loops. CloneDeep() is the only place that nulls CompiledDelegate, and it does so
+      // precisely when the structure may have changed (crossover/mutation), so once a delegate
+      // is attached it is safe to reuse directly — skipping the structural-key rebuild and
+      // cache lookup entirely for what is by far the most common case.
+      if (p.CompiledDelegate == null) {
+        string key = GetStructuralKey(p, data.RowCount);
+        if (!_delegateCache.TryGetValue(key, out var cachedDelegate)) {
+          cachedDelegate = CompileToDelegate(p, data.RowCount);
+          if (cachedDelegate == null) return double.NaN; // NaN signals rejection to the !IsNaN guard in the run loops
+          _delegateCache[key] = cachedDelegate;
+        }
+        p.CompiledDelegate = cachedDelegate;
       }
 
       int targetIdx = t.VariableIndices[t.TargetVariable];
@@ -118,7 +130,13 @@ namespace PGP.Core.Operators {
       p.NMSE = NMSE.ComputeScore(p);
       p.LD = LD.ComputeScore(p);
 
-      return t.Score.Compute(p);
+      // Same rationale as EvaluateStack: avoid recomputing the active metric a second time.
+      return t.Metric switch {
+        Metric.PearsonR => p.PearsonR,
+        Metric.NMSE => p.NMSE,
+        Metric.LD => p.LD,
+        _ => t.Score.Compute(p)
+      };
     }
 
 

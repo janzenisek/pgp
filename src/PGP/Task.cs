@@ -12,7 +12,8 @@ namespace PGP.Core {
     PearsonR2 = 1,
     NMSE = 2,
     MRE = 3,
-    LD = 4
+    MAE = 4,
+    LD = 5
   }
 
   public enum OptimizationDirection {
@@ -124,7 +125,6 @@ namespace PGP.Core {
     }
   }
 
-
   public class NMSE : IScore {
     public string Name { get => "NMSE"; }
     public Metric Metric { get => Metric.NMSE; }
@@ -159,15 +159,102 @@ namespace PGP.Core {
     }    
 
     public static double ComputeScore(RPN<Symbol> p) {
-      double nmse = Statistics.NMSE(p.TrueResults, p.EstimatedResults);
-      p.NMSE = nmse;
-      return nmse;
+      p.NMSE = Statistics.NMSE(p.TrueResults, p.EstimatedResults);      
+      return p.NMSE;
     }
 
     public double Compute(RPN<Symbol> p) {
       return ComputeScore(p);
     }
   }
+
+  public class MRE : IScore {
+    public string Name { get => "MRE"; }
+    public Metric Metric { get => Metric.MRE; }
+    public OptimizationDirection Direction { get => OptimizationDirection.Minimize; }
+
+    public double GetMaxValue() {
+      return double.MaxValue;
+    }
+
+    public double GetMinValue() {
+      return 0.0;
+    }
+
+    public double GetOptimum() {
+      return 0.0;
+    }
+
+    public double GetPessimal() {
+      return double.MaxValue;
+    }
+
+    public bool IsBetter(double score1, double score2) {
+      return score1 < score2;
+    }
+
+    public double GetScoreSum(double[] scores) {
+      return scores.Select(s => 1.0 / (1.0 + s)).Sum();
+    }
+
+    public double GetScoreCummulative(double score) {
+      return 1.0 / (1.0 + score);
+    }
+
+    public static double ComputeScore(RPN<Symbol> p) {
+      p.MRE = Statistics.MRE(p.TrueResults, p.EstimatedResults);      
+      return p.MRE;
+    }
+
+    public double Compute(RPN<Symbol> p) {
+      return ComputeScore(p);
+    }
+  }
+
+
+  public class MAE : IScore {
+    public string Name { get => "MAE"; }
+    public Metric Metric { get => Metric.MAE; }
+    public OptimizationDirection Direction { get => OptimizationDirection.Minimize; }
+
+    public double GetMaxValue() {
+      return double.MaxValue;
+    }
+
+    public double GetMinValue() {
+      return 0.0;
+    }
+
+    public double GetOptimum() {
+      return 0.0;
+    }
+
+    public double GetPessimal() {
+      return double.MaxValue;
+    }
+
+    public bool IsBetter(double score1, double score2) {
+      return score1 < score2;
+    }
+
+    public double GetScoreSum(double[] scores) {
+      return scores.Select(s => 1.0 / (1.0 + s)).Sum();
+    }
+
+    public double GetScoreCummulative(double score) {
+      return 1.0 / (1.0 + score);
+    }
+
+    public static double ComputeScore(RPN<Symbol> p) {
+      p.MAE = Statistics.MAE(p.TrueResults, p.EstimatedResults);
+      return p.MAE;
+    }
+
+    public double Compute(RPN<Symbol> p) {
+      return ComputeScore(p);
+    }
+  }
+
 
   public class LD : IScore {
     public string Name { get => "LD"; }
@@ -282,9 +369,13 @@ namespace PGP.Core {
       double sigma2 = sigma * sigma;
 
       double negloglike = 0.0;
+      // Both log terms are invariant across rows — hoist them out of the loop instead of
+      // recomputing (and re-calling Math.Log) n times per evaluation.
+      double halfLog2Pi = 0.5 * Math.Log(2.0 * Math.PI);
+      double logSigma = Math.Log(sigma);
       for (int i = 0; i < n; i++) {
         double r = p.EstimatedResults[i] - p.TrueResults[i];
-        negloglike += 0.5 * r * r / sigma2 + 0.5 * Math.Log(2.0 * Math.PI) + Math.Log(sigma);
+        negloglike += 0.5 * r * r / sigma2 + halfLog2Pi + logSigma;
       }
 
       // ── Total description length ────────────────────────────────────────────

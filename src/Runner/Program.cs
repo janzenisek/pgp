@@ -31,7 +31,7 @@ namespace PGP.Runner {
 
 
       // --- configure data set and modeling task
-      DataSet trainingSetOriginalOrder = ds.Subset(0, 100);
+      DataSet trainingSetOriginalOrder = ds.Subset(0, 1000);
       DataSet trainingSet = trainingSetOriginalOrder.Shuffle(fr);
       Core.Task modelingTask = new Core.Task(
         name: "GeoTorus",
@@ -118,16 +118,22 @@ namespace PGP.Runner {
       Console.WriteLine();
       Console.WriteLine($"Best Program RPN:   {pgp.BestProgramRPN}");
       Console.WriteLine($"Best Program INF:   {pgp.BestProgram}");
+      Console.WriteLine();
       Console.WriteLine($"Best NMSE:          {pgp.BestProgramNMSE}");
       Console.WriteLine($"Best Pearson R:     {pgp.BestProgramPearsonR}");
+      Console.WriteLine($"Best Pearson R2:    {pgp.BestProgramPearsonR2}");
       Console.WriteLine($"Best LD:            {pgp.BestProgramLD}");
       Console.WriteLine();
+      Console.WriteLine($"Min NMSE:           {pgp.MinNMSE}");
       Console.WriteLine($"Max Pearson R:      {pgp.MaxPearsonR}");
+      Console.WriteLine($"Max Pearson R2:     {pgp.MaxPearsonR2}");
       Console.WriteLine($"Min Length:         {pgp.MinLength}");
       Console.WriteLine($"Min LD:             {pgp.MinLD}");
       Console.WriteLine();
       Console.WriteLine($"Mean Pearson R:     {pgp.MeanPearsonR}");
       Console.WriteLine($"Median Pearson R:   {pgp.MedianPearsonR}");
+      Console.WriteLine($"Mean Pearson R2:    {pgp.MeanPearsonR2}");
+      Console.WriteLine($"Median Pearson R2:  {pgp.MedianPearsonR2}");
       Console.WriteLine($"Mean Length:        {pgp.MeanLength}");
       Console.WriteLine($"Median Length:      {pgp.MedianLength}");
       Console.WriteLine($"Mean LD:            {pgp.MeanLD}");
