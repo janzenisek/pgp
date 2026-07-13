@@ -9,17 +9,27 @@ namespace PGP.Runner {
     public static void Main(string[] args) {
       var fr = new FastRandom();
 
-      // --- setup sample data set
+      // --- setup sample data set "resinet"
       //var targetVariable = Resinet_TargetVariable_PvProduction;
       //var inputVariables = InputVariables["Resinet_BasicVariableSet_PvProduction"];
+
+      // --- setup sample data set "geotorus"
       var targetVariable = GeoTorus_TargetVariable_Volume;
       var inputVariables = InputVariables["GeoTorus_Volume"];
+
+      // --- setup sample data set "vprocess"
+      //var targetVariable = VProcess_TargetVariable_MWVT;
+      //var inputVariables = InputVariables["VProcess_Reduced"];
+
       var allVariables = inputVariables.Append(targetVariable).ToList();
       var variableIndices = allVariables
         .Select((x, i) => new { Item = x, Index = i })
         .ToDictionary(x => x.Item, x => x.Index);
+
       //DataSet ds = ProtoDataReader.ReadDataset_Numeric(Datasets["Resinet"], allVariables);
       DataSet ds = ProtoDataReader.ReadDataset_Numeric(Datasets["GeoTorus"], allVariables);
+      //DataSet ds = ProtoDataReader.ReadDataset_Numeric(Datasets["VProcess"], allVariables);
+
       var dds = ds.GetDoubleSet();
       var variableLimitDict = new Dictionary<string, Tuple<double, double>>();
 
@@ -31,28 +41,29 @@ namespace PGP.Runner {
 
 
       // --- configure data set and modeling task
-      DataSet trainingSetOriginalOrder = ds.Subset(0, 1000);
-      DataSet trainingSet = trainingSetOriginalOrder.Shuffle(fr);
+      DataSet sds = ds.Shuffle(fr);
+      DataSet trainingSet = sds.Subset(0, 1000);
+      DataSet testSet = sds.Subset(1000, 1000);
       Core.Task modelingTask = new Core.Task(
-        name: "GeoTorus",
+        name: "GPSR",
         targetVariable: targetVariable,
         inputVariables: inputVariables,
         metric: Metric.NMSE,
         optimizationDirection: OptimizationDirection.Minimize
       );
-      modelingTask.VariableLimitsDict = trainingSetOriginalOrder.GetDoubleSetLimits();
+      modelingTask.VariableLimitsDict = sds.GetDoubleSetLimits();
 
 
       // --- configure gp hyperparameters
       var pgp = new PgpAlgorithm(randomNumberGenerator: fr,
-        generations: 100,
+        generations: 200,
         populationSize: 100,
         symbolCount: 25,
-        nestingDepth: 10,
+        nestingDepth: 8,
         crossoverRate: 0.9,
         mutationRate: 0.25,
         maximumSelectionPressure: 1000,
-        elites: 5);
+        elites: 1);
 
       // --- configure gp symbol set (grammar)
       pgp.SelectedNonterminals = [
@@ -110,9 +121,12 @@ namespace PGP.Runner {
       sw.Stop();
 
 
-      // --- print results/stats
+      // --- print training results/stats
       pgp.ComputeScores();
 
+      Console.WriteLine();
+      Console.WriteLine();
+      Console.WriteLine("Training Results:");
       Console.WriteLine();
       Console.WriteLine($"Evaluations:        {pgp.EvaluationCount}");
       Console.WriteLine($"Runtime:            {(sw.ElapsedMilliseconds / 1000.0):f8} seconds");
@@ -123,30 +137,30 @@ namespace PGP.Runner {
       Console.WriteLine();
       Console.WriteLine($"Best NMSE:          {pgp.BestProgramNMSE}");
       Console.WriteLine($"Best RMSE:          {pgp.BestProgramRMSE}");
+      Console.WriteLine($"Best MAE:           {pgp.BestProgramMAE}");
+      Console.WriteLine($"Best MRE:           {pgp.BestProgramMRE}");
       Console.WriteLine($"Best Pearson R:     {pgp.BestProgramPearsonR}");
       Console.WriteLine($"Best Pearson R2:    {pgp.BestProgramPearsonR2}");
       Console.WriteLine($"Best LD:            {pgp.BestProgramLD}");
       Console.WriteLine();
-      Console.WriteLine($"Min NMSE:           {pgp.MinNMSE}");
-      Console.WriteLine($"Max Pearson R:      {pgp.MaxPearsonR}");
-      Console.WriteLine($"Max Pearson R2:     {pgp.MaxPearsonR2}");
-      Console.WriteLine($"Min Length:         {pgp.MinLength}");
-      Console.WriteLine($"Min LD:             {pgp.MinLD}");
-      Console.WriteLine();
-      Console.WriteLine($"Mean Pearson R:     {pgp.MeanPearsonR}");
-      Console.WriteLine($"Median Pearson R:   {pgp.MedianPearsonR}");
-      Console.WriteLine($"Mean Pearson R2:    {pgp.MeanPearsonR2}");
-      Console.WriteLine($"Median Pearson R2:  {pgp.MedianPearsonR2}");
-      Console.WriteLine($"Mean Length:        {pgp.MeanLength}");
-      Console.WriteLine($"Median Length:      {pgp.MedianLength}");
-      Console.WriteLine($"Mean LD:            {pgp.MeanLD}");
-      Console.WriteLine($"Median LD:          {pgp.MedianLD}");
 
+      // --- print test results/stats
+      pgp.ComputeScores(testSet);
+      Console.WriteLine("Test Results:");
+      Console.WriteLine();
+      Console.WriteLine($"Best NMSE:          {pgp.BestProgramNMSE}");
+      Console.WriteLine($"Best RMSE:          {pgp.BestProgramRMSE}");
+      Console.WriteLine($"Best MAE:           {pgp.BestProgramMAE}");
+      Console.WriteLine($"Best MRE:           {pgp.BestProgramMRE}");
+      Console.WriteLine($"Best Pearson R:     {pgp.BestProgramPearsonR}");
+      Console.WriteLine($"Best Pearson R2:    {pgp.BestProgramPearsonR2}");
+      Console.WriteLine($"Best LD:            {pgp.BestProgramLD}");
+      Console.WriteLine();
     }
 
-    // =============================================================================================
 
-    // Sample data set "Resinet"
+
+    // =============================================================================================    
 
     public static Dictionary<string, string> Datasets = new Dictionary<string, string>()
     {
@@ -154,6 +168,7 @@ namespace PGP.Runner {
       ,{ "GeoTorus", @"..\..\..\sample-data\geo-torus.csv" }
       ,{ "SinglePoint", @"..\..\..\sample-data\single-point.csv" }
       ,{ "SomePoints", @"..\..\..\sample-data\some-points.csv" }
+      ,{ "VProcess", @"..\..\..\sample-data\vprocess_preprocessed.csv" }
     };
 
     public static Dictionary<string, List<string>> InputVariables = new Dictionary<string, List<string>>()
@@ -166,6 +181,7 @@ namespace PGP.Runner {
       ,{ "Resinet_ReducedVariableSet_BatterySOC", new List<string>() { "globalRadiation", "globalRadiationSum2h", "globalRadiationSumFrame07to12h" } }
       ,{ "GeoTorus_Surface", new List<string>() { "r", "R" } }
       ,{ "GeoTorus_Volume", new List<string>() { "r", "R" } }
+      
     };
 
     public static string Resinet_TargetVariable_PvProduction = "pvProduction";
@@ -173,6 +189,7 @@ namespace PGP.Runner {
     public static string Resinet_TargetVariable_BatterySOC = "batterySOC";
     public static string GeoTorus_TargetVariable_Surface = "A";
     public static string GeoTorus_TargetVariable_Volume = "V";
+    public static string VProcess_TargetVariable_MWVT = "MW VT   [ppm]";
   }
 }
 

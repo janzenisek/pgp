@@ -124,6 +124,8 @@ namespace PGP.Core {
     public double BestProgramPearsonR2 => population.OrderBy(x => OrderByScore(x, Task.Metric)).First().PearsonR2;
     public double BestProgramNMSE => population.OrderBy(x => OrderByScore(x, Task.Metric)).First().NMSE;
     public double BestProgramRMSE => population.OrderBy(x => OrderByScore(x, Task.Metric)).First().RMSE;
+    public double BestProgramMAE => population.OrderBy(x => OrderByScore(x, Task.Metric)).First().MAE;
+    public double BestProgramMRE => population.OrderBy(x => OrderByScore(x, Task.Metric)).First().MRE;
     public double BestProgramLD => population.OrderBy(x => OrderByScore(x, Task.Metric)).First().LD;
     public double MeanPearsonR => population.Average(x => x.PearsonR);
     public double MedianPearsonR => population.Select(x => x.PearsonR).Median();
@@ -137,6 +139,26 @@ namespace PGP.Core {
     public void ComputeScores() {
       for(int i = 0; i < population.Length; i++) {
         var p = population[i];
+        p.PearsonR = Statistics.PearsonR(p.TrueResults, p.EstimatedResults);
+        p.PearsonR2 = p.PearsonR * p.PearsonR;
+        p.RMSE = Statistics.RMSE(p.TrueResults, p.EstimatedResults);
+        p.NMSE = Statistics.NMSE(p.TrueResults, p.EstimatedResults);
+        p.MRE = Statistics.MRE(p.TrueResults, p.EstimatedResults);
+        p.MAE = Statistics.MAE(p.TrueResults, p.EstimatedResults);
+        p.LD = LD.ComputeScore(p);
+      }
+    }
+
+    public void ComputeScores(DataSet ds) {      
+      var data = ds.GetArray(Task.VariableIndices.Keys.ToList());
+      var targetVarIdx = Task.VariableIndices[Task.TargetVariable];
+      DataRecord dr = new DataRecord { Data = data, RowCount = ds.RowCount, TargetIndex = targetVarIdx };
+
+      for (int i = 0; i < population.Length; i++) {
+        var p = population[i];
+        p.CompiledDelegate = null;
+        Evaluate(this, p, Task, dr);
+
         p.PearsonR = Statistics.PearsonR(p.TrueResults, p.EstimatedResults);
         p.PearsonR2 = p.PearsonR * p.PearsonR;
         p.RMSE = Statistics.RMSE(p.TrueResults, p.EstimatedResults);
