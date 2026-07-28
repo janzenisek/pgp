@@ -57,7 +57,7 @@ namespace PGP.Core {
     public DataSet DataSet { get; set; }
     public DataRecord DataRecord { get; set; }
 
-    
+
     // GP Settings
     public int Generations { get; set; }
     public int PopulationSize { get; set; }
@@ -105,6 +105,8 @@ namespace PGP.Core {
     public int EvaluationCount { get; private set; }
     public bool LogStatistics { get; set; } = false;
     public bool UseParallelization { get; set; } = true;
+    public bool UseDeterministicParallelization { get; set; } = true;
+    public int DeterministicSeed { get; set; } = 42;
     public int OptimizationIterations { get; set; } = 10;
     public bool PerformSimplification { get; set; } = false;
     public bool PerformPenalization { get; set; } = false;
@@ -117,7 +119,7 @@ namespace PGP.Core {
     public double MinMAE => population.Min(x => x.MAE);
     public double MinNMSE => population.Min(x => x.NMSE);
     public double MinLength => population.Min(x => x.Count);
-    public double MinLD => population.Min(x => x.LD);    
+    public double MinLD => population.Min(x => x.LD);
     public string BestProgram => population.OrderBy(x => OrderByScore(x, Task.Metric)).First().ToInfixString();
     public string BestProgramRPN => population.OrderBy(x => OrderByScore(x, Task.Metric)).First().ToString();
     public double BestProgramPearsonR => population.OrderBy(x => OrderByScore(x, Task.Metric)).First().PearsonR;
@@ -129,15 +131,15 @@ namespace PGP.Core {
     public double BestProgramLD => population.OrderBy(x => OrderByScore(x, Task.Metric)).First().LD;
     public double MeanPearsonR => population.Average(x => x.PearsonR);
     public double MedianPearsonR => population.Select(x => x.PearsonR).Median();
-    public double MeanPearsonR2 => population.Average(x => x.PearsonR2);  
+    public double MeanPearsonR2 => population.Average(x => x.PearsonR2);
     public double MedianPearsonR2 => population.Select(x => x.PearsonR2).Median();
     public double MeanLength => population.Average(x => x.Count);
     public double MedianLength => population.Select(x => x.Count).Median();
     public double MeanLD => population.Average(x => x.LD);
     public double MedianLD => population.Select(x => x.LD).Median();
-    
+
     public void ComputeScores() {
-      for(int i = 0; i < population.Length; i++) {
+      for (int i = 0; i < population.Length; i++) {
         var p = population[i];
         p.PearsonR = Statistics.PearsonR(p.TrueResults, p.EstimatedResults);
         p.PearsonR2 = p.PearsonR * p.PearsonR;
@@ -149,7 +151,7 @@ namespace PGP.Core {
       }
     }
 
-    public void ComputeScores(DataSet ds) {      
+    public void ComputeScores(DataSet ds) {
       var data = ds.GetArray(Task.VariableIndices.Keys.ToList());
       var targetVarIdx = Task.VariableIndices[Task.TargetVariable];
       DataRecord dr = new DataRecord { Data = data, RowCount = ds.RowCount, TargetIndex = targetVarIdx };
@@ -170,9 +172,9 @@ namespace PGP.Core {
       }
     }
 
-    private double OrderByScore(RPN<Symbol> p, EvaluationMetric m = EvaluationMetric.NMSE) { 
+    private double OrderByScore(RPN<Symbol> p, EvaluationMetric m = EvaluationMetric.NMSE) {
       return m switch {
-        EvaluationMetric.PearsonR => 1.0 - Math.Abs(p.PearsonR), 
+        EvaluationMetric.PearsonR => 1.0 - Math.Abs(p.PearsonR),
         EvaluationMetric.PearsonR2 => 1.0 - p.PearsonR2,
         EvaluationMetric.NMSE => p.NMSE,
         EvaluationMetric.RMSE => p.RMSE,
@@ -199,7 +201,7 @@ namespace PGP.Core {
       MaximumSelectionPressure = maximumSelectionPressure;
       Elites = elites;
       SymbolCount = symbolCount;
-      NestingDepth = nestingDepth;       
+      NestingDepth = nestingDepth;
 
       UseParallelization = false;
       LogStatistics = false;
@@ -209,7 +211,7 @@ namespace PGP.Core {
     }
 
 
-    
+
     #region Fit and Run
 
     public async System.Threading.Tasks.Task Fit(Task task, DataSet trainingData, CancellationToken ct) {
@@ -218,22 +220,24 @@ namespace PGP.Core {
       DataSet = trainingData;
       var data = trainingData.GetArray(task.VariableIndices.Keys.ToList());
       targetVariableIdx = task.VariableIndices[task.TargetVariable];
-      DataRecord = new DataRecord { Data = data, RowCount = trainingData.RowCount, TargetIndex = targetVariableIdx};
+      DataRecord = new DataRecord { Data = data, RowCount = trainingData.RowCount, TargetIndex = targetVariableIdx };
 
       // create and evaluate initial population
       await System.Threading.Tasks.Task.Run(() => Initialize(task, trainingData, data));
 
-      if(ct.IsCancellationRequested) return;
+      if (ct.IsCancellationRequested) return;
 
       // run main gp loop
       await System.Threading.Tasks.Task.Run(() => {
-        if (UseParallelization) RunParallel(ct);
+        if (UseParallelization && UseDeterministicParallelization) RunParallelDeterministic(ct);
+        else if (UseParallelization) RunParallel(ct);
         else Run();
       });
     }
 
     // create and evaluate initial population
     public void Initialize(Task modelingTask, DataSet trainingData, double[] data) {
+      if (UseDeterministicParallelization) rng.Value = new FastRandom(DeriveDeterministicSeed(DeterministicSeed, -1, 0));
 
       double bestFitScore = modelingTask.Score.GetPessimal();
       RPN<Symbol> bestSolution = null;
@@ -254,7 +258,178 @@ namespace PGP.Core {
       EvaluationCount = 0;
     }
 
-    public void RunParallel(CancellationToken ct) {      
+    public void RunParallelDeterministic(CancellationToken ct) {
+      int eliteCount = Math.Clamp(Elites, 0, PopulationSize);
+      var score = Task.Score;
+
+      double[] fitScores = GetScores(Task.Metric);
+      double[] fitScoresNew = new double[PopulationSize];
+
+      RPN<Symbol>[] populationNew = new RPN<Symbol>[PopulationSize];
+
+      // Initialize() places the best initial program in slot zero.
+      RPN<Symbol> bestSolution = population[0].CloneDeepWithResults();
+
+      double bestFitScore = fitScores[0];
+      int crossoverFailed = 0;
+
+      for (int g = 0; g < Generations; g++) {
+        if (ct.IsCancellationRequested) break;
+
+        double sumFitScores = score.GetScoreSum(fitScores);
+
+        Selection.fitScoreSum = sumFitScores;
+        Selection.fitScores = fitScores.ToList();
+
+        // Rank the current population from best to worst.
+        int[] rankedIndices = Enumerable.Range(0, PopulationSize).ToArray();
+
+        Array.Sort(rankedIndices, (a, b) => {
+          if (score.IsBetter(fitScores[a], fitScores[b])) {
+            return -1;
+          }
+
+          if (score.IsBetter(fitScores[b], fitScores[a])) {
+            return 1;
+          }
+
+          // Deterministic tie handling.
+          return a.CompareTo(b);
+        });
+
+        // Copy the best Elites programs without modifying them.
+        for (int e = 0; e < eliteCount; e++) {
+          int sourceIndex = rankedIndices[e];
+          populationNew[e] = population[sourceIndex].CloneDeepWithResults();
+          fitScoresNew[e] = fitScores[sourceIndex];
+        }
+
+        // Each slot is only written by its corresponding Parallel.For
+        // iteration, so these arrays do not require locking.
+        int[] evaluationCounts = new int[PopulationSize];
+
+        int[] crossoverFailures = new int[PopulationSize];
+
+        Parallel.For(eliteCount, PopulationSize, i => {
+          // The RNG stream belongs to (generation, population index),
+          // not to the worker thread executing this iteration.
+          rng.Value = new FastRandom(DeriveDeterministicSeed(DeterministicSeed, g, i));
+
+          // Retry until this population slot receives a valid program.
+          // The RNG is deliberately created outside this loop so retries
+          // advance the slot's stream instead of repeating forever.
+          while (true) {
+            int c1Idx = Select(this, population, Task);
+            int c2Idx = Select(this, population, Task);
+
+            RPN<Symbol> c1 = population[c1Idx];
+            RPN<Symbol> c2 = population[c2Idx];
+
+            // Always initialize the offspring. In the existing parallel
+            // implementation populationNew[i] can otherwise retain an old
+            // program when crossover is not selected.
+            RPN<Symbol> offspring = c1.CloneDeep();
+
+            if (Rng.NextDouble() < CrossoverRate) {
+              RPN<Symbol> crossed = Crossover(this, c1, c2);
+
+              if (crossed != null) {
+                offspring = crossed;
+              } else {
+                crossoverFailures[i]++;
+              }
+            }
+
+            if (Rng.NextDouble() < MutationRate) {
+              if (Mutators.Count > 0) {
+                var mutator = Mutators[Rng.Next(0, Mutators.Count)];
+                offspring = mutator(this, offspring);
+              } else {
+                offspring = Mutate(this, offspring);
+              }
+            }
+
+            if (PerformSimplification) {
+              offspring = Simplify(offspring);
+            }
+
+            double f;
+
+            if (Optimizer != null) {
+              var optimizedResult = Optimizer(this, offspring, Task, DataRecord);
+              offspring = optimizedResult.Item1;
+              f = optimizedResult.Item2;
+              evaluationCounts[i] += OptimizationIterations;
+            } else {
+              f = Evaluate(this, offspring, Task, DataRecord);
+              evaluationCounts[i]++;
+            }
+            
+
+            if (!double.IsNaN(f)) {
+              populationNew[i] = offspring;
+              fitScoresNew[i] = f;
+              break;
+            }
+
+            // Do not recreate the RNG here. The next retry must continue
+            // consuming this population slot's deterministic stream.
+          }
+        });
+
+        // Perform the reduction after Parallel.For and scan in index
+        // order. This gives deterministic tie handling and removes the
+        // bestSolution lock from the parallel hot path.
+        for (int i = eliteCount; i < PopulationSize; i++) {
+          double f = fitScoresNew[i];
+
+          if (score.IsBetter(f, bestFitScore)) {
+            bestFitScore = f;
+            bestSolution = populationNew[i].CloneDeepWithResults();
+          }
+        }
+
+        int generationalEvaluationCount = 0;
+
+        for (int i = eliteCount; i < PopulationSize; i++) {
+          generationalEvaluationCount += evaluationCounts[i];
+          crossoverFailed += crossoverFailures[i];
+        }
+
+        EvaluationCount += generationalEvaluationCount;
+
+        // Swap generations.
+        var tmpPopulation = population;
+        population = populationNew;
+        populationNew = tmpPopulation;
+
+        var tmpFitScores = fitScores;
+        fitScores = fitScoresNew;
+        fitScoresNew = tmpFitScores;
+
+        if (LogStatistics) {
+          Console.WriteLine(
+            $"Gen: {g + 1:d4}, " +
+            $"Score ({score.Name}): {bestSolution.Score:f4}, " +
+            $"PR: {bestSolution.PearsonR:f4}, " +
+            $"PR2: {bestSolution.PearsonR2:f4}, " +
+            $"NMSE: {bestSolution.NMSE:f4}, " +
+            $"LD: {bestSolution.LD:f2}, " +
+            $"MeanSize: {population.Select(x => x.Count).Average():f2}, " +
+            $"MedSize: {population.Select(x => x.Count).Median():f2}");
+        }
+      }
+
+      // Ensure public BestProgram/score properties see the global best.
+      population[0] = bestSolution.CloneDeepWithResults();
+
+      if (LogStatistics) {
+        Console.WriteLine();
+        Console.WriteLine($"Crossover Failed: {crossoverFailed}");
+      }
+    }
+
+    public void RunParallel(CancellationToken ct) {
       double[] fitScores = GetScores(Task.Metric);
       double[] fitScoresNew = fitScores.ToArray(); // pre-fill so no slot is ever zero     
       RPN<Symbol>[] populationNew = population.Select(pi => (RPN<Symbol>)pi.Clone()).ToArray();
@@ -263,10 +438,6 @@ namespace PGP.Core {
 
       double currentSelectionPressure = 0.0;
       int crossoverFailed = 0;
-
-      // tmp stats
-      //var sizeDiffAfterCrossover = new List<double>();
-      //var sizeDiffAfterMutation = new List<double>();
 
       // Pre-fill all elite slots: populationNew[1..Elites-1] are Clone() objects with zero
       // stats that the loop never overwrites. After the first swap those zeros end up in
@@ -282,7 +453,7 @@ namespace PGP.Core {
       {
         if (ct.IsCancellationRequested) break;
 
-        int generationalEvaluationCount = 0;        
+        int generationalEvaluationCount = 0;
         double sumFitScores = Task.Score.GetScoreSum(fitScores);
         var fitScoresList = fitScores.ToList();
 
@@ -292,88 +463,86 @@ namespace PGP.Core {
         var rangePartitioner = Partitioner.Create(Elites, PopulationSize);
         Parallel.ForEach(rangePartitioner,
           () => 0,
-          (range, state, localEvaluationCount) =>
-          {
+          (range, state, localEvaluationCount) => {
             for (int i = range.Item1; i < range.Item2 && currentSelectionPressure < MaximumSelectionPressure;) {
 
-            // select
-            var c1Idx = Select(this, population, Task);
-            var c2Idx = Select(this, population, Task);
+              // select
+              var c1Idx = Select(this, population, Task);
+              var c2Idx = Select(this, population, Task);
 
-            var c1 = population[c1Idx];
-            var c2 = population[c2Idx];
-            var f1 = fitScores[c1Idx];
-            var f2 = fitScores[c2Idx];
+              var c1 = population[c1Idx];
+              var c2 = population[c2Idx];
+              var f1 = fitScores[c1Idx];
+              var f2 = fitScores[c2Idx];
 
-            // cross
-            if (Rng.NextDouble() < CrossoverRate) {
-              RPN<Symbol> offspring = Crossover(this, c1, c2);              
-              //var diff = offspring.Count - (c1.Count + c2.Count) / 2.0;
-              //sizeDiffAfterCrossover.Add(diff);
-              if (offspring == null) {
-                offspring = (RPN<Symbol>)c1.CloneDeep(); // safe fallback: use parent
-                Interlocked.Increment(ref crossoverFailed);
+              // cross
+              if (Rng.NextDouble() < CrossoverRate) {
+                RPN<Symbol> offspring = Crossover(this, c1, c2);
+                //var diff = offspring.Count - (c1.Count + c2.Count) / 2.0;
+                //sizeDiffAfterCrossover.Add(diff);
+                if (offspring == null) {
+                  offspring = (RPN<Symbol>)c1.CloneDeep(); // safe fallback: use parent
+                  Interlocked.Increment(ref crossoverFailed);
+                }
+                populationNew[i] = offspring;
               }
-              populationNew[i] = offspring;
-            }
 
-            // mutate
-            if (Rng.NextDouble() < MutationRate) {
-              // select mutator from list or use default
-              if (Mutators.Count > 0) {
-                var mutator = Mutators[Rng.Next(0, Mutators.Count)];
-                populationNew[i] = mutator(this, populationNew[i]);
+              // mutate
+              if (Rng.NextDouble() < MutationRate) {
+                // select mutator from list or use default
+                if (Mutators.Count > 0) {
+                  var mutator = Mutators[Rng.Next(0, Mutators.Count)];
+                  populationNew[i] = mutator(this, populationNew[i]);
+                } else {
+                  populationNew[i] = Mutate(this, populationNew[i]);
+                }
+
+                //var diff = populationNew[i].Count - population[i].Count;
+                //sizeDiffAfterMutation.Add(diff);
+              }
+
+
+              // simplify
+              if (PerformSimplification)
+                populationNew[i] = Simplify(populationNew[i]);
+
+
+              // evaluate                        
+              double f = double.NaN;
+              if (Optimizer != null) {
+                var optimizedResult = Optimizer(this, populationNew[i], Task, DataRecord);
+                populationNew[i] = optimizedResult.Item1;
+                f = optimizedResult.Item2;
               } else {
-                populationNew[i] = Mutate(this, populationNew[i]);
+                f = Evaluate(this, populationNew[i], Task, DataRecord);
               }
-                          
-              //var diff = populationNew[i].Count - population[i].Count;
-              //sizeDiffAfterMutation.Add(diff);
-            }
+              localEvaluationCount++;
 
 
-            // simplify
-            if(PerformSimplification)
-              populationNew[i] = Simplify(populationNew[i]);
-
-
-            // evaluate                        
-            double f = double.NaN;
-            if(Optimizer != null) {
-              var optimizedResult = Optimizer(this, populationNew[i], Task, DataRecord);
-              populationNew[i] = optimizedResult.Item1;
-              f = optimizedResult.Item2;
-            } else {
-              f = Evaluate(this, populationNew[i], Task, DataRecord);
-            }
-            localEvaluationCount++;
-
-
-            if (!double.IsNaN(f)) {
-              //if (f > Math.Min(f1, f2)) { // OS              
-              if (Task.Score.IsBetter(f, bestFitScore)) { // f > bestFitScore if Pearson R is used
-                lock (bestSolutionLocker) {
-                  if (Task.Score.IsBetter(f, bestFitScore)) { // f > bestFitScore if Pearson R is used
-                    bestFitScore = f;
-                    bestSolution = (RPN<Symbol>)populationNew[i].CloneDeepWithResults();
+              if (!double.IsNaN(f)) {
+                //if (f > Math.Min(f1, f2)) { // OS              
+                if (Task.Score.IsBetter(f, bestFitScore)) { // f > bestFitScore if Pearson R is used
+                  lock (bestSolutionLocker) {
+                    if (Task.Score.IsBetter(f, bestFitScore)) { // f > bestFitScore if Pearson R is used
+                      bestFitScore = f;
+                      bestSolution = (RPN<Symbol>)populationNew[i].CloneDeepWithResults();
+                    }
                   }
                 }
+                fitScoresNew[i] = f;
+                i++;
+                //} // OS
+              } else {
+                //Console.WriteLine("Evaluation resulted in NaN.");
+                //Console.WriteLine(populationNew[i].ToInfixString());
               }
-              fitScoresNew[i] = f;
-              i++;
-              //} // OS
-            } else {
-              //Console.WriteLine("Evaluation resulted in NaN.");
-              //Console.WriteLine(populationNew[i].ToInfixString());
-            }
 
-            //lock (locker) currentSelectionPressure = generationalEvaluations / (double)PopulationSize;
-          }
-          return localEvaluationCount;
-        }, (localEvaluationCount) =>
-        {
-          lock (locker) generationalEvaluationCount += localEvaluationCount;
-        });
+              //lock (locker) currentSelectionPressure = generationalEvaluations / (double)PopulationSize;
+            }
+            return localEvaluationCount;
+          }, (localEvaluationCount) => {
+            lock (locker) generationalEvaluationCount += localEvaluationCount;
+          });
         // swap 
         var tmpPopulation = population;
         var tmpFitScores = fitScores;
@@ -393,11 +562,11 @@ namespace PGP.Core {
 
         EvaluationCount += generationalEvaluationCount;
 
-        if (LogStatistics) {          
+        if (LogStatistics) {
           Console.WriteLine($"Gen: {g + 1:d4}, Score ({Task.Score.Name}): {bestSolution.Score:f4}, PR: {bestSolution.PearsonR:f4}, PR2: {bestSolution.PearsonR2:f4}, NMSE: {bestSolution.NMSE:f4}, LD: {bestSolution.LD:f2}, MeanSize: {population.Select(x => x.Count).Average():f2}, MedSize: {population.Select(x => x.Count).Median():f2}");
         }
       }
-      
+
       // Sync the final best solution into population[0] so that the public statistics
       // properties always reflect the overall best found during the run.
       population[0] = (RPN<Symbol>)bestSolution.CloneDeepWithResults();
@@ -409,7 +578,7 @@ namespace PGP.Core {
       }
     }
 
-    public void Run() { 
+    public void Run() {
       var score = Task.Score;
 
       double[] fitScores = GetScores(Task.Metric);
@@ -452,7 +621,7 @@ namespace PGP.Core {
           RPN<Symbol> offspring = Crossover(this, c1, c2);
           if (offspring != null) {
             populationNew[i] = offspring;// score.IsBetter(GetScore(result.Item1, Task.Metric), GetScore(result.Item2, Task.Metric))
-                               //? result.Item1 : result.Item2;
+                                         //? result.Item1 : result.Item2;
           } else {
             populationNew[i] = (RPN<Symbol>)c1.CloneDeep(); // safe fallback: use parent
           }
@@ -521,7 +690,7 @@ namespace PGP.Core {
 
     #endregion Fit and Run
 
-    
+
     #region Simplifiers
 
     public RPN<Symbol> Simplify(RPN<Symbol> o) {
@@ -537,7 +706,7 @@ namespace PGP.Core {
 
           // ── arity-1 rules ────────────────────────────────────────────────────
           if (opr.Arity == 1) {
-            int argEnd   = i - 1;
+            int argEnd = i - 1;
             int argStart = p[argEnd].Type == SymbolType.Operator ? Utils.FindSubtreeLimit(p, argEnd) : argEnd;
 
             // constant folding: f(c) => c'
@@ -554,7 +723,7 @@ namespace PGP.Core {
                 p[argEnd].Type == SymbolType.Operator &&
                 (p[argEnd].Opr.Symbol == "pexp" || p[argEnd].Opr.Symbol == "exp")) {
               // strip both outer ops: remove [argStart..i] then re-insert inner arg
-              int innerArgEnd   = argEnd - 1;
+              int innerArgEnd = argEnd - 1;
               int innerArgStart = p[innerArgEnd].Type == SymbolType.Operator ? Utils.FindSubtreeLimit(p, innerArgEnd) : innerArgEnd;
               var innerArg = p.GetRange(innerArgStart, innerArgEnd - innerArgStart + 1).Select(s => s.Clone()).ToList();
               p.RemoveRange(argStart, i - argStart + 1);
@@ -564,7 +733,7 @@ namespace PGP.Core {
             if ((opr.Symbol == "pexp" || opr.Symbol == "exp") &&
                 p[argEnd].Type == SymbolType.Operator &&
                 (p[argEnd].Opr.Symbol == "plog" || p[argEnd].Opr.Symbol == "log")) {
-              int innerArgEnd   = argEnd - 1;
+              int innerArgEnd = argEnd - 1;
               int innerArgStart = p[innerArgEnd].Type == SymbolType.Operator ? Utils.FindSubtreeLimit(p, innerArgEnd) : innerArgEnd;
               var innerArg = p.GetRange(innerArgStart, innerArgEnd - innerArgStart + 1).Select(s => s.Clone()).ToList();
               p.RemoveRange(argStart, i - argStart + 1);
@@ -573,12 +742,12 @@ namespace PGP.Core {
             }
 
           } else { // ── arity-2 rules ───────────────────────────────────────────
-            int rightEnd   = i - 1;
+            int rightEnd = i - 1;
             int rightStart = p[rightEnd].Type == SymbolType.Operator ? Utils.FindSubtreeLimit(p, rightEnd) : rightEnd;
-            int leftEnd    = rightStart - 1;
-            int leftStart  = p[leftEnd].Type  == SymbolType.Operator ? Utils.FindSubtreeLimit(p, leftEnd)  : leftEnd;
+            int leftEnd = rightStart - 1;
+            int leftStart = p[leftEnd].Type == SymbolType.Operator ? Utils.FindSubtreeLimit(p, leftEnd) : leftEnd;
 
-            bool leftIsConst  = IsPureConstantSubtree(p, leftStart,  leftEnd);
+            bool leftIsConst = IsPureConstantSubtree(p, leftStart, leftEnd);
             bool rightIsConst = IsPureConstantSubtree(p, rightStart, rightEnd);
 
             // constant folding: both subtrees are constants
@@ -590,17 +759,17 @@ namespace PGP.Core {
               }
             }
 
-            bool   leftIsSingleConst  = leftStart  == leftEnd  && p[leftStart].Type  == SymbolType.Constant;
-            bool   rightIsSingleConst = rightStart  == rightEnd && p[rightStart].Type == SymbolType.Constant;
-            double leftVal            = leftIsSingleConst  ? p[leftStart].Con.Value  : double.NaN;
-            double rightVal           = rightIsSingleConst ? p[rightStart].Con.Value : double.NaN;
+            bool leftIsSingleConst = leftStart == leftEnd && p[leftStart].Type == SymbolType.Constant;
+            bool rightIsSingleConst = rightStart == rightEnd && p[rightStart].Type == SymbolType.Constant;
+            double leftVal = leftIsSingleConst ? p[leftStart].Con.Value : double.NaN;
+            double rightVal = rightIsSingleConst ? p[rightStart].Con.Value : double.NaN;
 
             // commutativity normalisation: move lone constants to the right operand so
             // that all downstream const-chain rules can fire uniformly.
             // c + x  =>  x + c  |  c * x  =>  x * c
             if ((opr.Symbol == "+" || opr.Symbol == "*") && leftIsSingleConst && !rightIsSingleConst) {
               // swap left and right subtrees in-place
-              var leftCopy  = p.GetRange(leftStart,  leftEnd  - leftStart  + 1).Select(s => s.Clone()).ToList();
+              var leftCopy = p.GetRange(leftStart, leftEnd - leftStart + 1).Select(s => s.Clone()).ToList();
               var rightCopy = p.GetRange(rightStart, rightEnd - rightStart + 1).Select(s => s.Clone()).ToList();
               p.RemoveRange(leftStart, i - leftStart + 1); // removes left + right + op atomically
               p.InsertRange(leftStart, rightCopy);
@@ -640,7 +809,7 @@ namespace PGP.Core {
                 changed = true; break;
               }
               // sin²(x) + cos²(x) => 1  (Pythagorean identity)
-              if (p[leftEnd].Type  == SymbolType.Operator && p[leftEnd].Opr.Symbol  == "*" &&
+              if (p[leftEnd].Type == SymbolType.Operator && p[leftEnd].Opr.Symbol == "*" &&
                   p[rightEnd].Type == SymbolType.Operator && p[rightEnd].Opr.Symbol == "*") {
                 // left  subtree must be  sin(x) * sin(x)
                 // right subtree must be  cos(x) * cos(x)  (or vice versa)
@@ -697,7 +866,7 @@ namespace PGP.Core {
                 p.RemoveAt(i); p.RemoveAt(leftStart); changed = true; break;
               }
               if ((rightIsSingleConst && rightVal == 0.0) ||
-                  (leftIsSingleConst  && leftVal  == 0.0)) {        // x * 0 => 0
+                  (leftIsSingleConst && leftVal == 0.0)) {        // x * 0 => 0
                 ReplaceWithConstant(p, leftStart, i, 0.0); changed = true; break;
               }
               if (rightIsSingleConst && rightVal == -1.0) {         // x * -1 => 0 - x
@@ -738,20 +907,20 @@ namespace PGP.Core {
             // ── distributive law: x*a + x*b => x*(a+b)  and  x*a - x*b => x*(a-b) ──
             // Applies when both children are * nodes and share a common left or right factor.
             if ((opr.Symbol == "+" || opr.Symbol == "-") &&
-                p[leftEnd].Type  == SymbolType.Operator && p[leftEnd].Opr.Symbol  == "*" &&
+                p[leftEnd].Type == SymbolType.Operator && p[leftEnd].Opr.Symbol == "*" &&
                 p[rightEnd].Type == SymbolType.Operator && p[rightEnd].Opr.Symbol == "*") {
 
               // decompose left  * into (llStart..llEnd) * (lrStart..lrEnd)
-              int llEnd   = leftEnd - 1;
+              int llEnd = leftEnd - 1;
               int llStart = p[llEnd].Type == SymbolType.Operator ? Utils.FindSubtreeLimit(p, llEnd) : llEnd;
-              int lrEnd   = llStart - 1;
+              int lrEnd = llStart - 1;
               int lrStart = lrEnd >= leftStart && p[lrEnd].Type == SymbolType.Operator
                             ? Utils.FindSubtreeLimit(p, lrEnd) : lrEnd;
 
               // decompose right * into (rlStart..rlEnd) * (rrStart..rrEnd)
-              int rlEnd   = rightEnd - 1;
+              int rlEnd = rightEnd - 1;
               int rlStart = p[rlEnd].Type == SymbolType.Operator ? Utils.FindSubtreeLimit(p, rlEnd) : rlEnd;
-              int rrEnd   = rlStart - 1;
+              int rrEnd = rlStart - 1;
               int rrStart = rrEnd >= rightStart && p[rrEnd].Type == SymbolType.Operator
                             ? Utils.FindSubtreeLimit(p, rrEnd) : rrEnd;
 
@@ -793,15 +962,15 @@ namespace PGP.Core {
       // pattern: [arg] opSym [arg] opSym  *   (i.e. f(x) * f(x))
       if (end - start < 2) return false;
       if (p[end].Type != SymbolType.Operator || p[end].Opr.Symbol != "*") return false;
-      int rightEnd   = end - 1;
+      int rightEnd = end - 1;
       int rightStart = p[rightEnd].Type == SymbolType.Operator ? Utils.FindSubtreeLimit(p, rightEnd) : rightEnd;
-      int leftEnd    = rightStart - 1;
-      int leftStart  = p[leftEnd].Type  == SymbolType.Operator ? Utils.FindSubtreeLimit(p, leftEnd)  : leftEnd;
+      int leftEnd = rightStart - 1;
+      int leftStart = p[leftEnd].Type == SymbolType.Operator ? Utils.FindSubtreeLimit(p, leftEnd) : leftEnd;
       if (leftStart < start) return false;
-      if (p[leftEnd].Type  != SymbolType.Operator || p[leftEnd].Opr.Symbol  != opSym) return false;
+      if (p[leftEnd].Type != SymbolType.Operator || p[leftEnd].Opr.Symbol != opSym) return false;
       if (p[rightEnd].Type != SymbolType.Operator || p[rightEnd].Opr.Symbol != opSym) return false;
       // both unary ops must share the same argument
-      int largStart = leftStart;  int largEnd = leftEnd - 1;
+      int largStart = leftStart; int largEnd = leftEnd - 1;
       int rargStart = rightStart; int rargEnd = rightEnd - 1;
       return SubtreesAreEqual(p, largStart, largEnd, rargStart, rargEnd);
     }
@@ -869,8 +1038,26 @@ namespace PGP.Core {
       _ => throw new ArgumentException("Unsupported metric: " + metric)
     };
 
+    private static int DeriveDeterministicSeed(int masterSeed, int generation, int populationIndex) {
+      unchecked {
+        uint x = (uint)masterSeed;
+
+        // generation + 2 allows generation == -1 for initialization.
+        x ^= (uint)(generation + 2) * 0x9E3779B9u;
+        x ^= (uint)(populationIndex + 1) * 0x85EBCA6Bu;
+
+        // Stable integer avalanche hash.
+        x ^= x >> 16;
+        x *= 0x7FEB352Du;
+        x ^= x >> 15;
+        x *= 0x846CA68Bu;
+        x ^= x >> 16;
+
+        return (int)x;
+      }
+    }
+
     #endregion Helpers
 
   }
-
 }
