@@ -157,6 +157,7 @@ namespace PGP.Core {
       for (int i = 0; i < population.Length; i++) {
         var p = population[i];
         p.CompiledDelegate = null;
+        p.Update(dr);
         Evaluate(this, p, Task, dr);
 
         p.PearsonR = Statistics.PearsonR(p.TrueResults, p.EstimatedResults);

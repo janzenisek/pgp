@@ -1,14 +1,13 @@
 ﻿namespace PGP.Utils {
   public class Misc {
 
-    private readonly static string charset = "abcdefghijklmnopqrstuvwxyz0123456789";
-    private static Random rnd = new Random();
+    private readonly static string charset = "abcdefghijklmnopqrstuvwxyz0123456789";    
 
-    public static string GenerateId(int length) {
+    public static string GenerateId(FastRandom rng, int length) {
       string newId = "";
 
       for (int i = 0; i < length; i++) {
-        newId += charset[rnd.Next(0, charset.Length)];
+        newId += charset[rng.Next(0, charset.Length)];
       }
       return newId;
     }

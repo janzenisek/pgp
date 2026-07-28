@@ -1,4 +1,5 @@
-﻿using System.Globalization;
+﻿using PGP.Utils;
+using System.Globalization;
 
 namespace PGP.Data {
 
@@ -18,8 +19,8 @@ namespace PGP.Data {
 
 
   public static class ProtoDataReader {
-    public static DataSet ReadDataset(string filepath, Dictionary<string, Tuple<SupportedSeriesTypes, string>> vardict) {
-      var s = new DataSet(Utils.Misc.GenerateId(10), null);
+    public static DataSet ReadDataset(FastRandom rng, string filepath, Dictionary<string, Tuple<SupportedSeriesTypes, string>> vardict) {
+      var s = new DataSet(Utils.Misc.GenerateId(rng, 10), null);
       s.Name = Path.GetFileNameWithoutExtension(filepath);
 
       s.Series = new Dictionary<string, ISeries>();
@@ -33,13 +34,13 @@ namespace PGP.Data {
 
           switch (vardict[name].Item1) {
             case SupportedSeriesTypes.DateTime:
-              series = new Series<DateTime>(Utils.Misc.GenerateId(10), s.Id);
+              series = new Series<DateTime>(Utils.Misc.GenerateId(rng, 10), s.Id);
               break;
             case SupportedSeriesTypes.String:
-              series = new Series<string>(Utils.Misc.GenerateId(10), s.Id);
+              series = new Series<string>(Utils.Misc.GenerateId(rng, 10), s.Id);
               break;
             case SupportedSeriesTypes.Double:
-              series = new Series<double>(Utils.Misc.GenerateId(10), s.Id);
+              series = new Series<double>(Utils.Misc.GenerateId(rng, 10), s.Id);
               break;
           }
 
@@ -68,8 +69,8 @@ namespace PGP.Data {
       return s;
     }
 
-    public static DataSet ReadDataset_Numeric(string filepath, List<string> variables, int? n = null) {
-      var s = new DataSet(Utils.Misc.GenerateId(10), null);
+    public static DataSet ReadDataset_Numeric(FastRandom rng, string filepath, List<string> variables, int? n = null) {
+      var s = new DataSet(Utils.Misc.GenerateId(rng, 10), null);
       s.Name = Path.GetFileNameWithoutExtension(filepath);
       s.Series = new Dictionary<string, ISeries>();
 
@@ -79,7 +80,7 @@ namespace PGP.Data {
         if (variables == null || variables.Count == 0) variables = dict.Keys.ToList();
 
         foreach (var name in variables) {
-          var series = new Series<double>(Utils.Misc.GenerateId(10), s.Id);
+          var series = new Series<double>(Utils.Misc.GenerateId(rng, 10), s.Id);
           series.Name = name;
           s.Series.Add(name, series);
         }

@@ -1,6 +1,8 @@
-﻿using System.Collections;
+﻿using PGP.Data;
+using System.Collections;
 
 namespace PGP.Core {
+
   public class RPN<T> : List<T>, ICloneable {
 
     public double Score { get; set; } = double.NaN;
@@ -134,6 +136,16 @@ namespace PGP.Core {
 
     public void Push(T item) {
       this.Insert(0, item);
+    }    
+
+    public void Update(DataRecord dr) {
+      EvaluationCapacity = dr.RowCount;
+      EstimatedResults = new List<double>(new double[EvaluationCapacity]);
+      TrueResults = new List<double>(new double[EvaluationCapacity]);
+
+      //for (int i = 0; i < dr.RowCount; i++) {
+      //  TrueResults[i] = dr.Data[dr.TargetIndex * dr.RowCount + i];
+      //}
     }
 
     public override string ToString() {

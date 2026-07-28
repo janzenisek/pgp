@@ -117,7 +117,7 @@ namespace PGP.Data {
 
       foreach (var ser in s.Series) ser.Value.Values.Clear();
       var order = Enumerable.Range(0, RowCount).ToList();
-      order.ShuffleFisherYates(fr);
+      order = order.ShuffleFisherYates(fr).ToList();
       foreach (var ser in Series) {
         for (int i = 0; i < order.Count; i++) {
           s.Series[ser.Key].Values.Add(Series[ser.Key].Values[order[i]]);
