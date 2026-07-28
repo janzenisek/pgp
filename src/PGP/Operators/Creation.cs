@@ -101,7 +101,7 @@ namespace PGP.Core.Operators {
 
         if (pgp.Rng.NextDouble() < pOperator) {
           int budgetSnapshot = budget;
-          var feasible = Functions.All.Where(op => budgetSnapshot >= op.Arity + 1).ToList();
+          var feasible = pgp.SelectedNonterminals.Where(op => budgetSnapshot >= op.Arity + 1).ToList();
           if (feasible.Count > 0) {
             var op = feasible[pgp.Rng.Next(feasible.Count)];
             budget--; // consume this operator's own symbol slot
