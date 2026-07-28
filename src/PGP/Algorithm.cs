@@ -145,7 +145,7 @@ namespace PGP.Core {
         p.NMSE = Statistics.NMSE(p.TrueResults, p.EstimatedResults);
         p.MRE = Statistics.MRE(p.TrueResults, p.EstimatedResults);
         p.MAE = Statistics.MAE(p.TrueResults, p.EstimatedResults);
-        p.LD = LD.ComputeScore(p);
+        p.LD = Metrics.LD.ComputeScore(p);
       }
     }
 
@@ -166,19 +166,19 @@ namespace PGP.Core {
         p.NMSE = Statistics.NMSE(p.TrueResults, p.EstimatedResults);
         p.MRE = Statistics.MRE(p.TrueResults, p.EstimatedResults);
         p.MAE = Statistics.MAE(p.TrueResults, p.EstimatedResults);
-        p.LD = LD.ComputeScore(p);
+        p.LD = Metrics.LD.ComputeScore(p);
       }
     }
 
-    private double OrderByScore(RPN<Symbol> p, Metric m = Metric.NMSE) { 
+    private double OrderByScore(RPN<Symbol> p, EvaluationMetric m = EvaluationMetric.NMSE) { 
       return m switch {
-        Metric.PearsonR => 1.0 - Math.Abs(p.PearsonR), 
-        Metric.PearsonR2 => 1.0 - p.PearsonR2,
-        Metric.NMSE => p.NMSE,
-        Metric.RMSE => p.RMSE,
-        Metric.MRE => p.MRE,
-        Metric.MAE => p.MAE,
-        Metric.LD => p.LD,
+        EvaluationMetric.PearsonR => 1.0 - Math.Abs(p.PearsonR), 
+        EvaluationMetric.PearsonR2 => 1.0 - p.PearsonR2,
+        EvaluationMetric.NMSE => p.NMSE,
+        EvaluationMetric.RMSE => p.RMSE,
+        EvaluationMetric.MRE => p.MRE,
+        EvaluationMetric.MAE => p.MAE,
+        EvaluationMetric.LD => p.LD,
         _ => throw new ArgumentException("Unsupported metric")
       };
     }
@@ -846,26 +846,26 @@ namespace PGP.Core {
 
     #region Helpers
 
-    private double[] GetScores(Metric metric) {
+    private double[] GetScores(EvaluationMetric metric) {
       return metric switch {
-        Metric.PearsonR => population.Select(x => x.PearsonR).ToArray(),
-        Metric.PearsonR2 => population.Select(x => x.PearsonR2).ToArray(),
-        Metric.NMSE => population.Select(x => x.NMSE).ToArray(),
-        Metric.RMSE => population.Select(x => x.RMSE).ToArray(),
-        Metric.MAE => population.Select(x => x.MAE).ToArray(),
-        Metric.MRE => population.Select(x => x.MRE).ToArray(),
-        Metric.LD => population.Select(x => x.LD).ToArray(),
+        EvaluationMetric.PearsonR => population.Select(x => x.PearsonR).ToArray(),
+        EvaluationMetric.PearsonR2 => population.Select(x => x.PearsonR2).ToArray(),
+        EvaluationMetric.NMSE => population.Select(x => x.NMSE).ToArray(),
+        EvaluationMetric.RMSE => population.Select(x => x.RMSE).ToArray(),
+        EvaluationMetric.MAE => population.Select(x => x.MAE).ToArray(),
+        EvaluationMetric.MRE => population.Select(x => x.MRE).ToArray(),
+        EvaluationMetric.LD => population.Select(x => x.LD).ToArray(),
         _ => throw new ArgumentException("Unsupported metric: " + metric)
       };
     }
 
-    private double GetScore(RPN<Symbol> p, Metric metric) => metric switch {
-      Metric.PearsonR => p.PearsonR,
-      Metric.PearsonR2 => p.PearsonR2,
-      Metric.NMSE => p.NMSE,
-      Metric.RMSE => p.RMSE,
-      Metric.MRE => p.MRE,
-      Metric.LD => p.LD,
+    private double GetScore(RPN<Symbol> p, EvaluationMetric metric) => metric switch {
+      EvaluationMetric.PearsonR => p.PearsonR,
+      EvaluationMetric.PearsonR2 => p.PearsonR2,
+      EvaluationMetric.NMSE => p.NMSE,
+      EvaluationMetric.RMSE => p.RMSE,
+      EvaluationMetric.MRE => p.MRE,
+      EvaluationMetric.LD => p.LD,
       _ => throw new ArgumentException("Unsupported metric: " + metric)
     };
 
