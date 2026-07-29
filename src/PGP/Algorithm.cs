@@ -62,8 +62,7 @@ namespace PGP.Core {
     public int Generations { get; set; }
     public int PopulationSize { get; set; }
     public double CrossoverRate { get; set; }
-    public double MutationRate { get; set; }
-    public double MaximumSelectionPressure { get; set; }
+    public double MutationRate { get; set; }    
     public int Elites { get; set; }
     public int SymbolCount { get; set; }
     public int NestingDepth { get; set; }
@@ -186,7 +185,7 @@ namespace PGP.Core {
     }
 
     public PgpAlgorithm(FastRandom randomNumberGenerator,
-      int generations = 1000, int populationSize = 1000, int symbolCount = 50, int nestingDepth = 10, double crossoverRate = 1.0, double mutationRate = 0.25, double maximumSelectionPressure = 200, int elites = 1) {
+      int generations = 1000, int populationSize = 1000, int symbolCount = 50, int nestingDepth = 10, double crossoverRate = 1.0, double mutationRate = 0.25, int elites = 1) {
       locker = new object();
       bestSolutionLocker = new object();
 
@@ -197,8 +196,7 @@ namespace PGP.Core {
       Generations = generations;
       PopulationSize = populationSize;
       CrossoverRate = crossoverRate;
-      MutationRate = mutationRate;
-      MaximumSelectionPressure = maximumSelectionPressure;
+      MutationRate = mutationRate;      
       Elites = elites;
       SymbolCount = symbolCount;
       NestingDepth = nestingDepth;
@@ -434,9 +432,7 @@ namespace PGP.Core {
       double[] fitScoresNew = fitScores.ToArray(); // pre-fill so no slot is ever zero     
       RPN<Symbol>[] populationNew = population.Select(pi => (RPN<Symbol>)pi.Clone()).ToArray();
       var bestSolution = (RPN<Symbol>)population.First().CloneDeepWithResults(); // take the first (elite or random)
-      double bestFitScore = fitScores.First(); // take the first (elite or random)
-
-      double currentSelectionPressure = 0.0;
+      double bestFitScore = fitScores.First(); // take the first (elite or random)      
       int crossoverFailed = 0;
 
       // Pre-fill all elite slots: populationNew[1..Elites-1] are Clone() objects with zero
@@ -449,7 +445,7 @@ namespace PGP.Core {
       populationNew[0] = (RPN<Symbol>)bestSolution.CloneDeepWithResults();
       fitScoresNew[0] = bestFitScore;
 
-      for (int g = 0; g < Generations && currentSelectionPressure < MaximumSelectionPressure; g++) // g = generation
+      for (int g = 0; g < Generations; g++) // g = generation
       {
         if (ct.IsCancellationRequested) break;
 
@@ -464,7 +460,7 @@ namespace PGP.Core {
         Parallel.ForEach(rangePartitioner,
           () => 0,
           (range, state, localEvaluationCount) => {
-            for (int i = range.Item1; i < range.Item2 && currentSelectionPressure < MaximumSelectionPressure;) {
+            for (int i = range.Item1; i < range.Item2;) {
 
               // select
               var c1Idx = Select(this, population, Task);
@@ -535,9 +531,7 @@ namespace PGP.Core {
               } else {
                 //Console.WriteLine("Evaluation resulted in NaN.");
                 //Console.WriteLine(populationNew[i].ToInfixString());
-              }
-
-              //lock (locker) currentSelectionPressure = generationalEvaluations / (double)PopulationSize;
+              }              
             }
             return localEvaluationCount;
           }, (localEvaluationCount) => {
@@ -585,9 +579,7 @@ namespace PGP.Core {
       RPN<Symbol>[] populationNew = population.Select(pi => (RPN<Symbol>)pi.Clone()).ToArray();
       double[] fitScoresNew = fitScores.ToArray(); // pre-fill so no slot is ever zero
       double bestFitScore = fitScores.Aggregate((a, b) => score.IsBetter(a, b) ? a : b);
-      var bestSolution = (RPN<Symbol>)population[Array.IndexOf(fitScores, bestFitScore)].CloneDeepWithResults();
-
-      double currentSelectionPressure = 0.0;
+      var bestSolution = (RPN<Symbol>)population[Array.IndexOf(fitScores, bestFitScore)].CloneDeepWithResults();      
 
       // Pre-fill all elite slots: populationNew[1..Elites-1] are Clone() objects with zero
       // stats that the loop never overwrites, causing zero stats in population[] after the swap.
@@ -598,7 +590,7 @@ namespace PGP.Core {
       populationNew[0] = (RPN<Symbol>)bestSolution.CloneDeepWithResults();
       fitScoresNew[0] = bestFitScore;
 
-      for (int g = 0; g < Generations && currentSelectionPressure < MaximumSelectionPressure; g++) // g = generation
+      for (int g = 0; g < Generations; g++) // g = generation
       {
         // recompute selection weights each generation from the current population scores
         double sumFitScores = score.GetScoreSum(fitScores);
@@ -655,10 +647,8 @@ namespace PGP.Core {
             }
             fitScoresNew[i] = f;
             i++;
-          }
-
-          //currentSelectionPressure = generationalEvaluations / (double)PopulationSize;
-        } while (i < populationNew.Length && currentSelectionPressure < MaximumSelectionPressure);
+          }          
+        } while (i < populationNew.Length);
 
         // swap 
         var tmpPopulation = population;
@@ -679,7 +669,7 @@ namespace PGP.Core {
 
         EvaluationCount += generationalEvaluationCount;
 
-        if (LogStatistics) Console.WriteLine($"Generation: {g:d4}, Evaluations: {generationalEvaluationCount:d4}, Selection Pressure: {currentSelectionPressure:f2}, Score: {bestFitScore:f12}");
+        if (LogStatistics) Console.WriteLine($"Generation: {g:d4}, Evaluations: {generationalEvaluationCount:d4}, Score: {bestFitScore:f12}");
       }
 
       // Sync the final best solution into population[0] so that the public statistics
