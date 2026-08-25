@@ -28,11 +28,9 @@ namespace PGP.Core {
   // - Split Mutation operations into different mutation operators (e.g. SubtreeMutation, PointMutation, HoistMutation, etc.) that can be applied with different probabilities and can be easily extended with new mutation types without modifying the core algorithm logic
   // - Synchronize Run() and RunParallel(), currently RunParallel() is more up to date
   // - Synchronize ModelingTask and Score, so that OptimizationDirection is available only once
-  // - Rename Score to Result
-  // - Rename ModelingTask to Task
+  // - Rename Score to Result  
 
-  // GP improvements and extensions to consider:
-  // - implement LD-based evaluation (unify with PR and NMSE)
+  // GP improvements and extensions to consider:  
   // - implement a NSGA variant
   // - implement a Bezier-based encoding, implement a reversed Casteljau algorithm to search control points from data.
   // - implement a Bezier crossover operator that creates offspring by interpolating between two parents in the program space, which can help to explore the search space more smoothly and potentially find better solutions by combining features of both parents in a more nuanced way than simple subtree swapping

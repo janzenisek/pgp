@@ -7,7 +7,10 @@ using PGP.Core.Operators;
 namespace PGP.Runner {
   public class Program {
     public static void Main(string[] args) {
-      var fr = new FastRandom();
+      const int dataSeed = 42;
+      const int algorithmSeed = 2;
+      var dataRng = new FastRandom(dataSeed);
+      var algorithmRng = new FastRandom(algorithmSeed);
 
       // --- setup sample data set "resinet"
       //var targetVariable = Resinet_TargetVariable_PvProduction;
@@ -16,19 +19,14 @@ namespace PGP.Runner {
       // --- setup sample data set "geotorus"
       var targetVariable = GeoTorus_TargetVariable_Volume;
       var inputVariables = InputVariables["GeoTorus_Volume"];
-
-      // --- setup sample data set "vprocess"
-      //var targetVariable = VProcess_TargetVariable_MWVT;
-      //var inputVariables = InputVariables["VProcess_Reduced"];
-
+    
       var allVariables = inputVariables.Append(targetVariable).ToList();
       var variableIndices = allVariables
         .Select((x, i) => new { Item = x, Index = i })
         .ToDictionary(x => x.Item, x => x.Index);
 
-      //DataSet ds = ProtoDataReader.ReadDataset_Numeric(Datasets["Resinet"], allVariables);
-      DataSet ds = ProtoDataReader.ReadDataset_Numeric(Datasets["GeoTorus"], allVariables);
-      //DataSet ds = ProtoDataReader.ReadDataset_Numeric(Datasets["VProcess"], allVariables);
+      //DataSet ds = ProtoDataReader.ReadDataset_Numeric(rng, Datasets["Resinet"], allVariables);
+      DataSet ds = ProtoDataReader.ReadDataset_Numeric(dataRng, Datasets["GeoTorus"], allVariables);      
 
       var dds = ds.GetDoubleSet();
       var variableLimitDict = new Dictionary<string, Tuple<double, double>>();
@@ -41,28 +39,27 @@ namespace PGP.Runner {
 
 
       // --- configure data set and modeling task
-      DataSet sds = ds.Shuffle(fr);
+      DataSet sds = ds.Shuffle(dataRng);
       DataSet trainingSet = sds.Subset(0, 1000);
-      DataSet testSet = sds.Subset(1000, 1000);
+      DataSet testSet = sds.Subset(1000, 2000);
       Core.Task modelingTask = new Core.Task(
         name: "GPSR",
         targetVariable: targetVariable,
         inputVariables: inputVariables,
-        metric: Metric.NMSE,
+        metric: EvaluationMetric.NMSE,
         optimizationDirection: OptimizationDirection.Minimize
       );
       modelingTask.VariableLimitsDict = sds.GetDoubleSetLimits();
 
 
       // --- configure gp hyperparameters
-      var pgp = new PgpAlgorithm(randomNumberGenerator: fr,
-        generations: 200,
+      var pgp = new PgpAlgorithm(randomNumberGenerator: algorithmRng,
+        generations: 100,
         populationSize: 100,
         symbolCount: 25,
         nestingDepth: 8,
         crossoverRate: 0.9,
-        mutationRate: 0.25,
-        maximumSelectionPressure: 1000,
+        mutationRate: 0.25,        
         elites: 1);
 
       // --- configure gp symbol set (grammar)
@@ -98,6 +95,8 @@ namespace PGP.Runner {
       // --- configure algorithm options
       pgp.LogStatistics = true;
       pgp.UseParallelization = true;
+      pgp.UseDeterministicParallelization = true;
+      pgp.DeterministicSeed = algorithmSeed;
       pgp.PerformSimplification = false;
       pgp.OptimizationIterations = 10;
 
@@ -167,8 +166,7 @@ namespace PGP.Runner {
        { "Resinet", @"..\..\..\sample-data\resinet.csv" }
       ,{ "GeoTorus", @"..\..\..\sample-data\geo-torus.csv" }
       ,{ "SinglePoint", @"..\..\..\sample-data\single-point.csv" }
-      ,{ "SomePoints", @"..\..\..\sample-data\some-points.csv" }
-      ,{ "VProcess", @"..\..\..\sample-data\vprocess_preprocessed.csv" }
+      ,{ "SomePoints", @"..\..\..\sample-data\some-points.csv" }      
     };
 
     public static Dictionary<string, List<string>> InputVariables = new Dictionary<string, List<string>>()
@@ -180,16 +178,14 @@ namespace PGP.Runner {
       ,{ "Resinet_ReducedVariableSet_PowerConsumption", new List<string>() { "dayLength", "hoursAfterSunrise" } }
       ,{ "Resinet_ReducedVariableSet_BatterySOC", new List<string>() { "globalRadiation", "globalRadiationSum2h", "globalRadiationSumFrame07to12h" } }
       ,{ "GeoTorus_Surface", new List<string>() { "r", "R" } }
-      ,{ "GeoTorus_Volume", new List<string>() { "r", "R" } }
-      
+      ,{ "GeoTorus_Volume", new List<string>() { "r", "R" } }      
     };
 
     public static string Resinet_TargetVariable_PvProduction = "pvProduction";
     public static string Resinet_TargetVariable_PowerConsumption = "powerConsumption";
     public static string Resinet_TargetVariable_BatterySOC = "batterySOC";
     public static string GeoTorus_TargetVariable_Surface = "A";
-    public static string GeoTorus_TargetVariable_Volume = "V";
-    public static string VProcess_TargetVariable_MWVT = "MW VT   [ppm]";
+    public static string GeoTorus_TargetVariable_Volume = "V";    
   }
 }
 
