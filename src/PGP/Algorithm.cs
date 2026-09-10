@@ -257,7 +257,352 @@ namespace PGP.Core {
     }
 
     public void RunNSGAII(CancellationToken ct) {
-      throw new NotImplementedException("NSGA-II is not yet implemented.");
+      // ===========================================================================================
+      // NSGA-II for multi-objective symbolic regression.
+      //
+      // Mirrors RunParallelDeterministic's shape (deterministic per-slot RNG streams, parallel
+      // offspring generation, reused buffers) but replaces single-objective fitness comparison with:
+      //   1) Pareto dominance + fast non-dominated sorting (rank),
+      //   2) crowding distance (diversity of the objective space, not to be confused with the
+      //      "Diversity" optimization target, which measures phenotypic diversity of programs),
+      //   3) crowded-comparison binary tournament selection,
+      //   4) (mu + mu) environmental selection: parents + offspring are merged, ranked, and the
+      //      best PopulationSize individuals (by rank, then crowding distance) survive.
+      //
+      // Objective order is fixed once per run (HashSet enumeration order is stable while
+      // unmodified) so objective vectors stay comparable across generations.
+      // ===========================================================================================
+
+      string[] targets = Task.OptimizationTargets.ToArray();
+      int objectiveCount = targets.Length;
+
+      // Per-objective weight, defaulting to equal weighting (Task ctor already fills this in).
+      // Weights bias *which* objectives dominate crowding-distance based diversity preservation;
+      // they deliberately do NOT influence Pareto dominance itself, which must remain unweighted
+      // to stay mathematically correct.
+      double[] weights = targets
+        .Select(t => Task.OptimizationTargetWeights != null && Task.OptimizationTargetWeights.TryGetValue(t, out var w) ? w : 1.0 / objectiveCount)
+        .ToArray();
+
+      // Index of the accuracy objective (the metric-driven target variable), or -1 if not present.
+      int accuracyObjectiveIndex = Array.IndexOf(targets, Task.TargetVariable);
+      int complexityObjectiveIndex = Array.IndexOf(targets, OptimizationTarget.Complexity);
+      int diversityObjectiveIndex = Array.IndexOf(targets, OptimizationTarget.Diversity);
+
+      int n = PopulationSize;
+      int eliteCount = Math.Clamp(Elites, 0, PopulationSize); // preserved implicitly by (mu+mu) elitist selection
+
+      // Reused buffers across generations to avoid per-generation heap churn.
+      RPN<Symbol>[] offspring = new RPN<Symbol>[n];
+      RPN<Symbol>[] combinedPop = new RPN<Symbol>[2 * n];
+      double[][] combinedObj = new double[2 * n][];
+      for (int i = 0; i < 2 * n; i++) combinedObj[i] = new double[objectiveCount];
+
+      int[] rank = new int[n];
+      double[] crowd = new double[n];
+
+      // --- evaluate objectives for the initial population and rank it for the first tournament ---
+      ComputeAccuracyAndComplexityObjectives(population, combinedObj, n, accuracyObjectiveIndex, complexityObjectiveIndex);
+      ComputeDiversityObjective(population, combinedObj, n, diversityObjectiveIndex);
+      FastNonDominatedSort(combinedObj, n, rank);
+      ComputeCrowdingDistances(combinedObj, n, rank, weights, crowd);
+
+      int crossoverFailed = 0;
+
+      for (int g = 0; g < Generations; g++) {
+        if (ct.IsCancellationRequested) break;
+
+        int[] evaluationCounts = new int[n];
+        int[] crossoverFailures = new int[n];
+
+        // Snapshot for safe capture inside the parallel closure (arrays are not reallocated below).
+        RPN<Symbol>[] parents = population;
+        int[] parentRank = rank;
+        double[] parentCrowd = crowd;
+
+        Parallel.For(0, n, new ParallelOptions { MaxDegreeOfParallelism = MaxDegreeOfParallelism }, i => {
+          // The RNG stream belongs to (generation, population index), matching the deterministic
+          // scheme used by RunParallelDeterministic.
+          rng.Value = new FastRandom(DeriveDeterministicSeed(DeterministicSeed, g, i));
+
+          while (true) {
+            int c1Idx = CrowdedTournamentSelect(parentRank, parentCrowd, n);
+            int c2Idx = CrowdedTournamentSelect(parentRank, parentCrowd, n);
+
+            RPN<Symbol> c1 = parents[c1Idx];
+            RPN<Symbol> c2 = parents[c2Idx];
+
+            RPN<Symbol> child = c1.CloneDeep();
+
+            if (Rng.NextDouble() < CrossoverRate) {
+              RPN<Symbol> crossed = Crossover(this, c1, c2);
+              if (crossed != null) {
+                child = crossed;
+              } else {
+                crossoverFailures[i]++;
+              }
+            }
+
+            if (Rng.NextDouble() < MutationRate) {
+              if (Mutators.Count > 0) {
+                var mutator = Mutators[Rng.Next(0, Mutators.Count)];
+                child = mutator(this, child);
+              } else {
+                child = Mutate(this, child);
+              }
+            }
+
+            if (PerformSimplification) {
+              child = Simplify(child);
+            }
+
+            double f;
+
+            if (Optimizer != null) {
+              var optimizedResult = Optimizer(this, child, Task, DataRecord);
+              child = optimizedResult.Item1;
+              f = optimizedResult.Item2;
+              evaluationCounts[i] += OptimizationIterations;
+            } else {
+              f = Evaluate(this, child, Task, DataRecord);
+              evaluationCounts[i]++;
+            }
+
+            if (!double.IsNaN(f)) {
+              offspring[i] = child;
+              break;
+            }
+            // Do not recreate the RNG here: retries must keep consuming this slot's stream.
+          }
+        });
+
+        for (int i = 0; i < n; i++) {
+          EvaluationCount += evaluationCounts[i];
+          crossoverFailed += crossoverFailures[i];
+        }
+
+        // --- (mu + mu) environmental selection -------------------------------------------------
+        // Merge parents and offspring into the combined buffer, evaluate objectives for the
+        // offspring half, then rank + crowd the whole pool of 2n individuals.
+        Array.Copy(population, 0, combinedPop, 0, n);
+        Array.Copy(offspring, 0, combinedPop, n, n);
+
+        ComputeAccuracyAndComplexityObjectives(offspring, combinedObj, n, accuracyObjectiveIndex, complexityObjectiveIndex, destinationOffset: n);
+        ComputeDiversityObjective(combinedPop, combinedObj, 2 * n, diversityObjectiveIndex);
+
+        int[] combinedRank = new int[2 * n];
+        double[] combinedCrowd = new double[2 * n];
+        FastNonDominatedSort(combinedObj, 2 * n, combinedRank);
+        ComputeCrowdingDistances(combinedObj, 2 * n, combinedRank, weights, combinedCrowd);
+
+        // Select the best n individuals: sort by (rank asc, crowding desc), ties broken by index
+        // for determinism.
+        int[] survivorOrder = Enumerable.Range(0, 2 * n).ToArray();
+        Array.Sort(survivorOrder, (a, b) => {
+          if (combinedRank[a] != combinedRank[b]) return combinedRank[a].CompareTo(combinedRank[b]);
+          if (combinedCrowd[a] != combinedCrowd[b]) return combinedCrowd[b].CompareTo(combinedCrowd[a]);
+          return a.CompareTo(b);
+        });
+
+        RPN<Symbol>[] nextPopulation = new RPN<Symbol>[n];
+        for (int i = 0; i < n; i++) {
+          int src = survivorOrder[i];
+          nextPopulation[i] = combinedPop[src];
+          combinedObj[i] = combinedObj[src]; // reuse array instances instead of reallocating
+          rank[i] = combinedRank[src];
+          crowd[i] = combinedCrowd[src];
+        }
+        // Re-point the now-stale second half of combinedObj to fresh arrays for next generation.
+        for (int i = n; i < 2 * n; i++) combinedObj[i] = new double[objectiveCount];
+
+        population = nextPopulation;
+
+        if (LogStatistics) {
+          // Report the best individual w.r.t. the accuracy objective within the current rank-0 front,
+          // falling back to the plain metric ordering if no accuracy objective is configured.
+          var front0 = Enumerable.Range(0, n).Where(i => rank[i] == 0);
+          var best = accuracyObjectiveIndex >= 0
+            ? population[front0.OrderBy(i => combinedObj[i][accuracyObjectiveIndex]).First()]
+            : population.OrderBy(x => OrderByScore(x, Task.Metric)).First();
+
+          Console.WriteLine(
+            $"Gen: {g + 1:d4}, " +
+            $"Front0 size: {front0.Count()}/{n}, " +
+            $"Best Score ({Task.Score.Name}): {best.Score:f4}, " +
+            $"NMSE: {best.NMSE:f4}, " +
+            $"MeanSize: {population.Select(x => x.Count).Average():f2}, " +
+            $"MedSize: {population.Select(x => x.Count).Median():f2}");
+        }
+      }
+
+      if (LogStatistics) {
+        Console.WriteLine();
+        Console.WriteLine($"Crossover Failed: {crossoverFailed}");
+      }
+    }
+
+    // Fills objective[i][accuracyObjectiveIndex] / objective[i][complexityObjectiveIndex] for
+    // pop[0..count), writing into destination[destinationOffset + i]. Both objectives are
+    // transformed into minimization form so dominance comparisons never need to know direction.
+    private void ComputeAccuracyAndComplexityObjectives(RPN<Symbol>[] pop, double[][] destination, int count, int accuracyObjectiveIndex, int complexityObjectiveIndex, int destinationOffset = 0) {
+      bool minimizeAccuracy = Task.OptimizationDirection == OptimizationDirection.Minimize;
+
+      for (int i = 0; i < count; i++) {
+        var obj = destination[destinationOffset + i];
+        var p = pop[i];
+
+        if (accuracyObjectiveIndex >= 0) {
+          // p.Score already holds task.Score.Compute(p), i.e. the value for Task.Metric.
+          obj[accuracyObjectiveIndex] = minimizeAccuracy ? p.Score : -p.Score;
+        }
+
+        if (complexityObjectiveIndex >= 0) {
+          // Program size (bloat control) is always to be minimized.
+          obj[complexityObjectiveIndex] = p.Count;
+        }
+      }
+    }
+
+    // Fills the diversity objective using pairwise phenotypic (estimated-output) distance across
+    // the whole supplied pool, so an individual's diversity score reflects how different its
+    // predictions are from every other program currently under consideration. Maximizing diversity
+    // is expressed in minimization form as the negated average distance.
+    private void ComputeDiversityObjective(RPN<Symbol>[] pool, double[][] destination, int count, int diversityObjectiveIndex) {
+      if (diversityObjectiveIndex < 0) return;
+
+      int rowCount = DataRecord.RowCount;
+      double[] avgDistance = new double[count];
+
+      Parallel.For(0, count, new ParallelOptions { MaxDegreeOfParallelism = MaxDegreeOfParallelism }, i => {
+        var ei = pool[i].EstimatedResults;
+        double sum = 0;
+
+        for (int j = 0; j < count; j++) {
+          if (j == i) continue;
+          var ej = pool[j].EstimatedResults;
+
+          double squaredSum = 0;
+          for (int k = 0; k < rowCount; k++) {
+            double d = ei[k] - ej[k];
+            squaredSum += d * d;
+          }
+          sum += Math.Sqrt(squaredSum / rowCount);
+        }
+
+        avgDistance[i] = count > 1 ? sum / (count - 1) : 0.0;
+      });
+
+      for (int i = 0; i < count; i++) destination[i][diversityObjectiveIndex] = -avgDistance[i];
+    }
+
+    // Standard O(N^2) fast non-dominated sort (Deb et al.). All objectives are assumed to already
+    // be in minimization form. Produces a rank per individual (0 = Pareto-optimal front).
+    private static void FastNonDominatedSort(double[][] objectives, int count, int[] rank) {
+      var dominationCount = new int[count];
+      var dominatedIndices = new List<int>[count];
+      var currentFront = new List<int>();
+
+      for (int p = 0; p < count; p++) {
+        dominatedIndices[p] = new List<int>();
+
+        for (int q = 0; q < count; q++) {
+          if (p == q) continue;
+
+          if (Dominates(objectives[p], objectives[q])) {
+            dominatedIndices[p].Add(q);
+          } else if (Dominates(objectives[q], objectives[p])) {
+            dominationCount[p]++;
+          }
+        }
+
+        if (dominationCount[p] == 0) {
+          rank[p] = 0;
+          currentFront.Add(p);
+        }
+      }
+
+      int frontIndex = 0;
+      while (currentFront.Count > 0) {
+        var nextFront = new List<int>();
+
+        foreach (var p in currentFront) {
+          foreach (var q in dominatedIndices[p]) {
+            if (--dominationCount[q] == 0) {
+              rank[q] = frontIndex + 1;
+              nextFront.Add(q);
+            }
+          }
+        }
+
+        frontIndex++;
+        currentFront = nextFront;
+      }
+    }
+
+    // True if a Pareto-dominates b: no worse in any (minimized) objective and strictly better in
+    // at least one.
+    private static bool Dominates(double[] a, double[] b) {
+      bool strictlyBetterInAny = false;
+
+      for (int k = 0; k < a.Length; k++) {
+        if (a[k] > b[k]) return false;
+        if (a[k] < b[k]) strictlyBetterInAny = true;
+      }
+
+      return strictlyBetterInAny;
+    }
+
+    // Crowding distance per Deb et al., computed independently within each rank front so that
+    // individuals are only compared for density against peers on the same front. Per-objective
+    // contributions are scaled by the (user-supplied or uniform) objective weights: this biases
+    // which objectives drive diversity preservation without altering Pareto dominance itself.
+    private static void ComputeCrowdingDistances(double[][] objectives, int count, int[] rank, double[] weights, double[] crowd) {
+      Array.Clear(crowd, 0, count);
+      if (count == 0) return;
+
+      int objectiveCount = objectives[0].Length;
+      var indicesByRank = Enumerable.Range(0, count).GroupBy(i => rank[i]);
+
+      foreach (var front in indicesByRank) {
+        var indices = front.ToArray();
+        if (indices.Length == 0) continue;
+
+        for (int k = 0; k < objectiveCount; k++) {
+          Array.Sort(indices, (a, b) => objectives[a][k].CompareTo(objectives[b][k]));
+
+          // Boundary individuals of a front are always maximally spread out; keep them.
+          crowd[indices[0]] = double.PositiveInfinity;
+          crowd[indices[^1]] = double.PositiveInfinity;
+
+          double min = objectives[indices[0]][k];
+          double max = objectives[indices[^1]][k];
+          double range = max - min;
+          if (range <= 0) continue; // all individuals identical in this objective, no contribution
+
+          double weight = weights != null && weights.Length > k ? weights[k] : 1.0;
+
+          for (int idx = 1; idx < indices.Length - 1; idx++) {
+            if (double.IsInfinity(crowd[indices[idx]])) continue; // boundary already fixed to infinity
+            double contribution = (objectives[indices[idx + 1]][k] - objectives[indices[idx - 1]][k]) / range;
+            crowd[indices[idx]] += weight * contribution;
+          }
+        }
+      }
+    }
+
+    // Binary crowded-comparison tournament: prefers lower rank, then higher crowding distance
+    // (more isolated, i.e. more diverse) individuals; this is the standard NSGA-II parent
+    // selection rule.
+    private int CrowdedTournamentSelect(int[] rank, double[] crowd, int poolSize) {
+      int a = Rng.Next(poolSize);
+      int b = Rng.Next(poolSize);
+      return CrowdedCompare(a, b, rank, crowd) <= 0 ? a : b;
+    }
+
+    private static int CrowdedCompare(int a, int b, int[] rank, double[] crowd) {
+      if (rank[a] != rank[b]) return rank[a] < rank[b] ? -1 : 1;
+      if (crowd[a] != crowd[b]) return crowd[a] > crowd[b] ? -1 : 1;
+      return 0;
     }
 
     public void RunParallelDeterministic(CancellationToken ct) {
