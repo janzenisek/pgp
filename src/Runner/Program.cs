@@ -44,17 +44,17 @@ namespace PGP.Runner {
       DataSet testSet = sds.Subset(1000, 2000);
       Core.Task modelingTask = new Core.Task(
         name: "GPSR",
-        targetVariable: targetVariable,
         inputVariables: inputVariables,
+        optimizationTargets: new HashSet<string> { targetVariable, OptimizationTarget.Complexity },
         metric: EvaluationMetric.NMSE,
-        optimizationDirection: OptimizationDirection.Minimize
+        optimizationDirection: OptimizationDirection.Minimize        
       );
       modelingTask.VariableLimitsDict = sds.GetDoubleSetLimits();
 
 
       // --- configure gp hyperparameters
       var pgp = new PgpAlgorithm(randomNumberGenerator: algorithmRng,
-        generations: 100,
+        generations: 1000,
         populationSize: 100,
         symbolCount: 25,
         nestingDepth: 8,

@@ -102,7 +102,8 @@ namespace PGP.Core {
     public int EvaluationCount { get; private set; }
     public bool LogStatistics { get; set; } = false;
     public bool UseParallelization { get; set; } = true;
-    public bool UseDeterministicParallelization { get; set; } = true;
+    public bool UseDeterministicParallelization { get; set; } = true;    
+    public int MaxDegreeOfParallelism { get; set; } = -1;
     public int DeterministicSeed { get; set; } = 42;
     public int OptimizationIterations { get; set; } = 10;
     public bool PerformSimplification { get; set; } = false;
@@ -225,7 +226,8 @@ namespace PGP.Core {
 
       // run main gp loop
       await System.Threading.Tasks.Task.Run(() => {
-        if (UseParallelization && UseDeterministicParallelization) RunParallelDeterministic(ct);
+        if (Task.OptimizationTargets.Count > 1) RunNSGAII(ct);
+        else if (UseParallelization && UseDeterministicParallelization) RunParallelDeterministic(ct);
         else if (UseParallelization) RunParallel(ct);
         else Run();
       });
@@ -252,6 +254,10 @@ namespace PGP.Core {
       }
       population[0] = (RPN<Symbol>)bestSolution.CloneDeepWithResults();
       EvaluationCount = 0;
+    }
+
+    public void RunNSGAII(CancellationToken ct) {
+      throw new NotImplementedException("NSGA-II is not yet implemented.");
     }
 
     public void RunParallelDeterministic(CancellationToken ct) {
@@ -306,7 +312,7 @@ namespace PGP.Core {
 
         int[] crossoverFailures = new int[PopulationSize];
 
-        Parallel.For(eliteCount, PopulationSize, i => {
+        Parallel.For(eliteCount, PopulationSize, new ParallelOptions { MaxDegreeOfParallelism = MaxDegreeOfParallelism }, i => {
           // The RNG stream belongs to (generation, population index),
           // not to the worker thread executing this iteration.
           rng.Value = new FastRandom(DeriveDeterministicSeed(DeterministicSeed, g, i));
@@ -453,9 +459,10 @@ namespace PGP.Core {
 
         Selection.fitScoreSum = sumFitScores;
         Selection.fitScores = fitScoresList;
+        ParallelOptions parallelOptions = new ParallelOptions { MaxDegreeOfParallelism = MaxDegreeOfParallelism };
 
         var rangePartitioner = Partitioner.Create(Elites, PopulationSize);
-        Parallel.ForEach(rangePartitioner,
+        Parallel.ForEach(rangePartitioner, parallelOptions,
           () => 0,
           (range, state, localEvaluationCount) => {
             for (int i = range.Item1; i < range.Item2;) {
