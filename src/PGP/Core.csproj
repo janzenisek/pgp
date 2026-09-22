@@ -13,4 +13,10 @@
     <ProjectReference Include="..\Utils\Utils.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Used by Operators/EvaluationGpu.cs for the optional, data-parallel GPU evaluator. -->
+    <PackageReference Include="ILGPU" Version="1.5.1" />
+    <PackageReference Include="ILGPU.Algorithms" Version="1.5.1" />
+  </ItemGroup>
+
 </Project>

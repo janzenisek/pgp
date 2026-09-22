@@ -7,8 +7,8 @@ using PGP.Core.Operators;
 namespace PGP.Runner {
   public class Program {
     public static void Main(string[] args) {
-      const int dataSeed = 42;
-      const int algorithmSeed = 2;
+      const int dataSeed = -1;
+      const int algorithmSeed = -1;
       var dataRng = new FastRandom(dataSeed);
       var algorithmRng = new FastRandom(algorithmSeed);
 
@@ -26,7 +26,7 @@ namespace PGP.Runner {
         .ToDictionary(x => x.Item, x => x.Index);
 
       //DataSet ds = ProtoDataReader.ReadDataset_Numeric(rng, Datasets["Resinet"], allVariables);
-      DataSet ds = ProtoDataReader.ReadDataset_Numeric(dataRng, Datasets["GeoTorus"], allVariables);      
+      DataSet ds = ProtoDataReader.ReadDataset_Numeric(dataRng, Datasets["GeoTorusLarge"], allVariables);      
 
       var dds = ds.GetDoubleSet();
       var variableLimitDict = new Dictionary<string, Tuple<double, double>>();
@@ -40,8 +40,8 @@ namespace PGP.Runner {
 
       // --- configure data set and modeling task
       DataSet sds = ds.Shuffle(dataRng);
-      DataSet trainingSet = sds.Subset(0, 1000);
-      DataSet testSet = sds.Subset(1000, 2000);
+      DataSet trainingSet = sds.Subset(0, 100000);
+      DataSet testSet = sds.Subset(10000, 2000);
       Core.Task modelingTask = new Core.Task(
         name: "GPSR",
         inputVariables: inputVariables,
@@ -54,7 +54,7 @@ namespace PGP.Runner {
 
       // --- configure gp hyperparameters
       var pgp = new PgpAlgorithm(randomNumberGenerator: algorithmRng,
-        generations: 1000,
+        generations: 100,
         populationSize: 100,
         symbolCount: 25,
         nestingDepth: 8,
@@ -89,6 +89,7 @@ namespace PGP.Runner {
       pgp.Optimizer = Optimization.OptimizeCoefficientsAndConstants;
       pgp.Crossover = Crossing.Cross;
       pgp.Mutators = [Mutation.MutateReplaceSubtree, Mutation.MutateTerminateSubtree];
+      //pgp.Evaluate = EvaluationGpu.EvaluateGPU;
       pgp.Evaluate = Evaluation.EvaluateProgram;
 
 
@@ -165,6 +166,7 @@ namespace PGP.Runner {
     {
        { "Resinet", @"..\..\..\sample-data\resinet.csv" }
       ,{ "GeoTorus", @"..\..\..\sample-data\geo-torus.csv" }
+      ,{ "GeoTorusLarge", @"..\..\..\sample-data\geo-torus-large.csv" }
       ,{ "SinglePoint", @"..\..\..\sample-data\single-point.csv" }
       ,{ "SomePoints", @"..\..\..\sample-data\some-points.csv" }      
     };
