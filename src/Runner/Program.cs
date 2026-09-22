@@ -41,7 +41,7 @@ namespace PGP.Runner {
       // --- configure data set and modeling task
       DataSet sds = ds.Shuffle(dataRng);
       DataSet trainingSet = sds.Subset(0, 100000);
-      DataSet testSet = sds.Subset(10000, 2000);
+      DataSet testSet = sds.Subset(10000, 1000);
       Core.Task modelingTask = new Core.Task(
         name: "GPSR",
         inputVariables: inputVariables,
@@ -89,8 +89,8 @@ namespace PGP.Runner {
       pgp.Optimizer = Optimization.OptimizeCoefficientsAndConstants;
       pgp.Crossover = Crossing.Cross;
       pgp.Mutators = [Mutation.MutateReplaceSubtree, Mutation.MutateTerminateSubtree];
-      //pgp.Evaluate = EvaluationGpu.EvaluateGPU;
-      pgp.Evaluate = Evaluation.EvaluateProgram;
+      pgp.Evaluate = EvaluationGpu.EvaluateGPU;
+      //pgp.Evaluate = Evaluation.EvaluateProgram;
 
 
       // --- configure algorithm options
@@ -100,6 +100,7 @@ namespace PGP.Runner {
       pgp.DeterministicSeed = algorithmSeed;
       pgp.PerformSimplification = false;
       pgp.OptimizationIterations = 10;
+      pgp.MaxDegreeOfParallelism = -1;
 
 
       // --- run gp algorithm

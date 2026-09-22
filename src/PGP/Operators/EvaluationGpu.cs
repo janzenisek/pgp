@@ -36,6 +36,14 @@ namespace PGP.Core.Operators {
   // branch-light, and don't rely on unprotected math that could throw). Any program containing an
   // unsupported operator (e.g. raw Division/Logarithm/Exponential) transparently falls back to
   // Evaluation.EvaluateStack so correctness is never compromised.
+  //
+  // PRECISION: FLOAT (Float32), NOT DOUBLE
+  // The kernel computes in single precision. Many GPUs - especially integrated/consumer ones -
+  // either lack double (Float64) support entirely or emulate it at a large performance penalty;
+  // ILGPU throws ILGPU.CapabilityNotSupportedException at kernel-compile time on devices without
+  // native fp64. float is virtually universally supported, so all device-side buffers/arithmetic
+  // use float; conversion to/from the CPU-side double representation happens only at the host
+  // boundary (upload/read-back), trading a small amount of numeric precision for portability.
   // ===============================================================================================
   public static class EvaluationGpu {
 
@@ -52,6 +60,13 @@ namespace PGP.Core.Operators {
     private const byte OpProtectedLog = 18;
     private const byte OpProtectedExp = 19;
     private const byte OpPi = 20;
+
+    // Fixed, compile-time-constant size for the GPU kernel's per-thread evaluation stack.
+    // ILGPU's LocalMemory.Allocate1D requires a statically known size - it cannot depend on a
+    // runtime kernel parameter - so the stack size cannot vary per program at the kernel level.
+    // Programs whose actual required stack depth exceeds this are rejected on the host side
+    // (EvaluateGPU falls back to the CPU evaluator) rather than risking a buffer overrun.
+    private const int GpuMaxStackDepth = 64;
 
     private static readonly Dictionary<string, byte> _opcodeBySymbol = new() {
       { Functions.Addition.Symbol, OpAdd },
@@ -92,15 +107,14 @@ namespace PGP.Core.Operators {
       public required Accelerator Accelerator;
       public required Action<
         Index1D,
-        ArrayView<double>, int,
+        ArrayView<float>, int,
         ArrayView<byte>,
-        ArrayView<double>,
+        ArrayView<float>,
         ArrayView<int>,
         int,
-        int,
-        ArrayView<double>> Kernel;
+        ArrayView<float>> Kernel;
       public DataRecord? CachedDataRecordRef;
-      public MemoryBuffer1D<double, Stride1D.Dense>? CachedDataBuffer;
+      public MemoryBuffer1D<float, Stride1D.Dense>? CachedDataBuffer;
     }
 
     private static readonly ThreadLocal<ThreadGpuContext?> _threadContext = new(() => CreateThreadContext());
@@ -142,7 +156,7 @@ namespace PGP.Core.Operators {
       try {
         var accelerator = _device.CreateAccelerator(_context);
         var kernel = accelerator.LoadAutoGroupedStreamKernel<
-          Index1D, ArrayView<double>, int, ArrayView<byte>, ArrayView<double>, ArrayView<int>, int, int, ArrayView<double>>(
+          Index1D, ArrayView<float>, int, ArrayView<byte>, ArrayView<float>, ArrayView<int>, int, ArrayView<float>>(
           EvaluateRowKernel);
         return new ThreadGpuContext { Accelerator = accelerator, Kernel = kernel };
       } catch {
@@ -156,7 +170,8 @@ namespace PGP.Core.Operators {
     // evaluates the program over every row of `data`, fills TrueResults/EstimatedResults, and
     // returns the task's configured score, or NaN to signal a rejected/invalid program.
     public static double EvaluateGPU(PgpAlgorithm pgp, RPN<Symbol> p, Task t, DataRecord data) {
-      if (_gpuDisabled) return Evaluation.EvaluateStack(pgp, p, t, data);
+      if (_gpuDisabled)
+        return Evaluation.EvaluateStack(pgp, p, t, data);
 
       var ctx = _threadContext.Value;
       if (ctx == null) {
@@ -165,7 +180,8 @@ namespace PGP.Core.Operators {
 
       int n = p.Count;
       var opcodes = new byte[n];
-      var constants = new double[n];
+      var constants = new float[n]; // GPU-side math is single-precision (see class remarks: this
+                                     // device does not support double/Float64 at all)
       var varIndex = new int[n];
       int maxStackDepth = 0, currentDepth = 0;
 
@@ -173,12 +189,12 @@ namespace PGP.Core.Operators {
         var sym = p[i];
         if (sym.Type == SymbolType.Constant) {
           opcodes[i] = OpConstant;
-          constants[i] = sym.Con.Value;
+          constants[i] = (float)sym.Con.Value;
           varIndex[i] = -1;
           currentDepth += 1;
         } else if (sym.Type == SymbolType.Variable) {
           opcodes[i] = OpVariable;
-          constants[i] = sym.Var.Coefficient;
+          constants[i] = (float)sym.Var.Coefficient;
           varIndex[i] = sym.Var.Index;
           currentDepth += 1;
         } else {
@@ -193,16 +209,17 @@ namespace PGP.Core.Operators {
       }
 
       if (currentDepth != 1) return double.NaN; // malformed program
+      if (maxStackDepth > GpuMaxStackDepth) return Evaluation.EvaluateStack(pgp, p, t, data); // too deep for the fixed GPU stack -> CPU fallback
 
       int rowCount = data.RowCount;
-      double[]? estimates;
+      float[]? estimates;
 
       // This thread owns `ctx` exclusively - no locking needed between CPU worker threads, each
       // has its own Accelerator/stream/cached buffer. A watchdog timeout guards against a stalled
       // OpenCL driver (observed on some integrated GPUs) hanging the whole run: if a single launch
       // does not complete in time, GPU evaluation is disabled process-wide from then on.
       try {
-        estimates = RunKernelWithTimeout(ctx, data, opcodes, constants, varIndex, n, maxStackDepth, rowCount);
+        estimates = RunKernelWithTimeout(ctx, data, opcodes, constants, varIndex, n, rowCount);
       } catch (TimeoutException) {
         _gpuDisabled = true;
         Console.Error.WriteLine(
@@ -216,8 +233,8 @@ namespace PGP.Core.Operators {
       int targetIdx = t.VariableIndices[t.TargetVariable];
 
       for (int row = 0; row < rowCount; row++) {
-        double result = estimates[row];
-        if (double.IsNaN(result) || double.IsInfinity(result)) return double.NaN;
+        float result = estimates[row];
+        if (float.IsNaN(result) || float.IsInfinity(result)) return double.NaN;
         p.TrueResults[row] = data.Data[targetIdx * rowCount + row];
         p.EstimatedResults[row] = result;
       }
@@ -228,11 +245,14 @@ namespace PGP.Core.Operators {
 
     // Uploads DataRecord.Data to this thread's device once and reuses it for every subsequent
     // call with the same DataRecord instance (identity check by reference - DataRecord is created
-    // once per Fit run in Algorithm.cs and never mutated in place).
-    private static ArrayView<double> GetOrUploadDataBuffer(ThreadGpuContext ctx, DataRecord data) {
+    // once per Fit run in Algorithm.cs and never mutated in place). Converted to float once, on
+    // upload, since the GPU kernel is single-precision (see class remarks).
+    private static ArrayView<float> GetOrUploadDataBuffer(ThreadGpuContext ctx, DataRecord data) {
       if (ctx.CachedDataRecordRef != data || ctx.CachedDataBuffer == null) {
         ctx.CachedDataBuffer?.Dispose();
-        ctx.CachedDataBuffer = ctx.Accelerator.Allocate1D(data.Data);
+        var floatData = new float[data.Data.Length];
+        for (int i = 0; i < floatData.Length; i++) floatData[i] = (float)data.Data[i];
+        ctx.CachedDataBuffer = ctx.Accelerator.Allocate1D(floatData);
         ctx.CachedDataRecordRef = data;
       }
       return ctx.CachedDataBuffer.View;
@@ -242,16 +262,16 @@ namespace PGP.Core.Operators {
     // giving up, so a stalled OpenCL driver can never hang the calling (CPU population-parallel)
     // thread forever. Runs on this thread's own accelerator/context, so no cross-thread locking
     // is needed here.
-    private static double[] RunKernelWithTimeout(ThreadGpuContext ctx, DataRecord data, byte[] opcodes, double[] constants, int[] varIndex, int n, int maxStackDepth, int rowCount) {
+    private static float[] RunKernelWithTimeout(ThreadGpuContext ctx, DataRecord data, byte[] opcodes, float[] constants, int[] varIndex, int n, int rowCount) {
       var task = System.Threading.Tasks.Task.Run(() => {
         var dataView = GetOrUploadDataBuffer(ctx, data);
 
         using var opcodeBuffer = ctx.Accelerator.Allocate1D(opcodes);
         using var constantBuffer = ctx.Accelerator.Allocate1D(constants);
         using var varIndexBuffer = ctx.Accelerator.Allocate1D(varIndex);
-        using var estimatesBuffer = ctx.Accelerator.Allocate1D<double>(rowCount);
+        using var estimatesBuffer = ctx.Accelerator.Allocate1D<float>(rowCount);
 
-        ctx.Kernel(rowCount, dataView, rowCount, opcodeBuffer.View, constantBuffer.View, varIndexBuffer.View, n, maxStackDepth, estimatesBuffer.View);
+        ctx.Kernel(rowCount, dataView, rowCount, opcodeBuffer.View, constantBuffer.View, varIndexBuffer.View, n, estimatesBuffer.View);
         ctx.Accelerator.Synchronize();
 
         return estimatesBuffer.GetAsArray1D();
@@ -263,18 +283,20 @@ namespace PGP.Core.Operators {
 
     // GPU kernel body: one thread == one data row. Executes the flattened RPN program using a
     // small thread-local evaluation stack (ILGPU LocalMemory: private per-thread scratch space,
-    // analogous to a stackalloc'd array in a CPU method).
+    // analogous to a stackalloc'd array in a CPU method). Single-precision throughout: this
+    // device (and many integrated/consumer GPUs) does not support double/Float64 at all.
     private static void EvaluateRowKernel(
       Index1D row,
-      ArrayView<double> data, int rowCount,
+      ArrayView<float> data, int rowCount,
       ArrayView<byte> opcodes,
-      ArrayView<double> constants,
+      ArrayView<float> constants,
       ArrayView<int> varIndex,
       int programLength,
-      int maxStackDepth,
-      ArrayView<double> estimates) {
+      ArrayView<float> estimates) {
 
-      var stack = LocalMemory.Allocate1D<double>(maxStackDepth <= 0 ? 1 : maxStackDepth);
+      // Fixed compile-time-constant size (see GpuMaxStackDepth) - callers guarantee the actual
+      // program never needs more than this many slots before dispatching.
+      var stack = LocalMemory.Allocate1D<float>(GpuMaxStackDepth);
       int sp = -1; // stack pointer; points at the current top element
 
       for (int i = 0; i < programLength; i++) {
@@ -285,14 +307,14 @@ namespace PGP.Core.Operators {
         } else if (op == OpVariable) {
           stack[++sp] = data[varIndex[i] * rowCount + row] * constants[i];
         } else if (op == OpAdd) {
-          double b = stack[sp--]; double a = stack[sp--]; stack[++sp] = a + b;
+          float b = stack[sp--]; float a = stack[sp--]; stack[++sp] = a + b;
         } else if (op == OpSub) {
-          double b = stack[sp--]; double a = stack[sp--]; stack[++sp] = a - b;
+          float b = stack[sp--]; float a = stack[sp--]; stack[++sp] = a - b;
         } else if (op == OpMul) {
-          double b = stack[sp--]; double a = stack[sp--]; stack[++sp] = a * b;
+          float b = stack[sp--]; float a = stack[sp--]; stack[++sp] = a * b;
         } else if (op == OpAnalyticQuotient) {
-          double denom = stack[sp--]; double numer = stack[sp--];
-          stack[++sp] = numer / XMath.Sqrt(1.0 + denom * denom);
+          float denom = stack[sp--]; float numer = stack[sp--];
+          stack[++sp] = numer / XMath.Sqrt(1.0f + denom * denom);
         } else if (op == OpSin) {
           stack[sp] = XMath.Sin(stack[sp]);
         } else if (op == OpCos) {
@@ -302,18 +324,18 @@ namespace PGP.Core.Operators {
         } else if (op == OpTanh) {
           stack[sp] = XMath.Tanh(stack[sp]);
         } else if (op == OpProtectedLog) {
-          double v = stack[sp];
-          stack[sp] = v > 0.0 ? XMath.Log(v) : 0.0;
+          float v = stack[sp];
+          stack[sp] = v > 0.0f ? XMath.Log(v) : 0.0f;
         } else if (op == OpProtectedExp) {
-          double v = stack[sp];
-          stack[sp] = XMath.Exp(XMath.Min(XMath.Max(v, -100.0), 100.0));
+          float v = stack[sp];
+          stack[sp] = XMath.Exp(XMath.Min(XMath.Max(v, -100.0f), 100.0f));
         } else if (op == OpPi) {
           stack[sp] = stack[sp] * XMath.PI;
         }
       }
 
-      double result = stack[sp];
-      estimates[row] = double.IsNaN(result) || double.IsInfinity(result) ? double.NaN : result;
+      float result = stack[sp];
+      estimates[row] = float.IsNaN(result) || float.IsInfinity(result) ? float.NaN : result;
     }
   }
 }
